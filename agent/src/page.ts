@@ -64,7 +64,7 @@ export const page = `<!doctype html>
       <div><label for="count">How many</label><input id="count" type="number" min="1" value="1"></div>
     </div>
     <div class="grid" style="margin-top:10px">
-      <div><label for="airlines">Airlines on the trip (comma separated)</label><input id="airlines" list="airline-list" value="Korean Air, United"><datalist id="airline-list"></datalist></div>
+      <div><label for="airlines">Airlines on the trip (comma separated)</label><input id="airlines" list="airline-list" value="Korean Air, Delta"><datalist id="airline-list"></datalist></div>
       <div><label for="from">Departure countries (codes)</label><input id="from" value="KR, US"></div>
     </div>
     <div class="row"><button id="checkGo" type="submit">Check</button></div>
