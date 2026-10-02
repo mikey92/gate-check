@@ -51,15 +51,18 @@ export default {
     if (!question || question.length > MAX_QUESTION) {
       return json({error: `Ask a question of 1 to ${MAX_QUESTION} characters.`}, 400)
     }
-    // Preview versions may try another model per request; production always uses env.MODEL.
-    const model = env.DEBUG_ERRORS && typeof body.model === 'string' ? body.model : env.MODEL
+    // Preview versions may try another model or reasoning level per request, and skip the answer cache with "fresh".
+    const preview = Boolean(env.DEBUG_ERRORS)
+    const model = preview && typeof body.model === 'string' ? body.model : env.MODEL
+    const reasoning = preview && typeof body.reasoning === 'string' ? body.reasoning : env.REASONING
+    const store = preview && body.fresh === true ? undefined : env.ANSWERS
     const key = await answerKey(model, question)
     const answer = async (onEvent: (event: AgentEvent) => void): Promise<Result> => {
-      const cached = await env.ANSWERS?.get<Result>(key, 'json')
+      const cached = await store?.get<Result>(key, 'json')
       if (cached) return {...cached, cached: true}
-      const result = {...(await ask({...env, MODEL: model}, question, onEvent)), ms: Date.now() - started}
-      if (env.ANSWERS && result.answer.replace(CLOSING, '').trim().length > 20) {
-        ctx.waitUntil(env.ANSWERS.put(key, JSON.stringify(result), {expirationTtl: ANSWER_TTL_SECONDS}))
+      const result = {...(await ask({...env, MODEL: model, REASONING: reasoning}, question, onEvent)), ms: Date.now() - started}
+      if (store && result.answer.replace(CLOSING, '').trim().length > 20) {
+        ctx.waitUntil(store.put(key, JSON.stringify(result), {expirationTtl: ANSWER_TTL_SECONDS}))
       }
       return result
     }

@@ -7,6 +7,7 @@ export type Env = {
   KB_MCP_URL: string
   DATA_MCP_URL: string
   MODEL: string
+  REASONING?: string
 }
 
 export type Step = {tool: string; input: unknown; summary: string}
@@ -20,6 +21,13 @@ export type AgentEvent = {type: 'step'; step: Step} | {type: 'report'; report: C
 
 type ToolCall = {id: string; name: string; args: Record<string, unknown>}
 type ToolResult = {output: string; summary: string; pages?: Page[]; report?: CheckReport}
+
+// Nemotron reasons before it answers; REASONING picks how much (reasoning tokens are output tokens: time and allowance).
+const REASONING: Record<string, Record<string, boolean>> = {
+  off: {enable_thinking: false},
+  low: {enable_thinking: true, low_effort: true},
+  normal: {enable_thinking: true},
+}
 
 const MAX_TURNS = 6
 const MAX_TOOL_OUTPUT = 12000
@@ -110,8 +118,10 @@ export async function ask(env: Env, question: string, onEvent: (event: AgentEven
     {role: 'user', content: question},
   ]
   const usage: Usage = {calls: 0, input: 0, output: 0}
+  const reasoning = REASONING[env.REASONING ?? '']
   const run = async (payload: Record<string, unknown>) => {
-    const raw = (await env.AI.run(env.MODEL as keyof AiModels, {...payload, max_tokens: 1500, temperature: 0.1} as never)) as {usage?: {prompt_tokens?: number; completion_tokens?: number}}
+    const options = {...payload, max_tokens: 1500, temperature: 0.1, ...(reasoning ? {chat_template_kwargs: reasoning} : {})}
+    const raw = (await env.AI.run(env.MODEL as keyof AiModels, options as never)) as {usage?: {prompt_tokens?: number; completion_tokens?: number}}
     usage.calls++
     usage.input += raw?.usage?.prompt_tokens ?? 0
     usage.output += raw?.usage?.completion_tokens ?? 0
