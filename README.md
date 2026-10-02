@@ -4,6 +4,8 @@
 
 **Try it:** https://gate-check.mikey9220.workers.dev
 
+![Gate Check: the quick check, then the agent working through a question, with the rule engine's verdict shown before the answer](docs/demo.gif)
+
 Power bank rules changed fast in 2025 and 2026. ICAO limited power banks to two per passenger and banned recharging them on board from 27 March 2026; Korea, Japan and Hong Kong followed with their own dates; Emirates allows one and bans using it; IATA's 2026 guidance lists 100–160 Wh power banks as forbidden while ICAO still allows them with the airline's approval. News articles, airport pages and travel blogs restate all of this and go out of date. A traveller holding a "27,000 mAh" battery has to convert it to watt-hours, find every rule that applies to every leg, and pick the strictest.
 
 Gate Check does that with two kinds of content:
