@@ -16,7 +16,8 @@ export type Env = {
 } & PlanEnv
 
 export type Step = {tool: string; input: unknown; summary: string}
-export type Page = {title: string; url: string}
+// kind: official, news or aggregator (a third-party copy), so the page can list official pages first and label the rest.
+export type Page = {title: string; url: string; kind?: string}
 // sources: every page behind the tool results the answer was written from, collected in code rather than by the model.
 // report: the rule engine's verdict when the agent ran check_power_bank, so the page can show it before the answer.
 // usage: model calls and tokens, which is what the daily free allowance is spent on.
@@ -44,7 +45,7 @@ export const ONBOARD_FIELDS = ['checkedBaggage', 'useInFlight', 'rechargeInFligh
 type OnboardField = (typeof ONBOARD_FIELDS)[number]
 
 const TOOLS = [
-  tool('check_power_bank', 'Decide whether a power bank may fly. Converts mAh to Wh and evaluates every applicable rule (each airline named, the departure countries\' regulators, and worldwide guidance) in code. Use it for every "can I bring" question.', {
+  tool('check_power_bank', 'Decide whether a power bank may fly. Converts mAh to Wh and evaluates every applicable rule (each airline named, the departure countries\' regulators, and worldwide guidance) in code. Use it for every "can I bring" question that gives a capacity; without a capacity, use find_rules or compare_rules.', {
     mAh: {type: 'number', description: 'Capacity in mAh, if that is what the label shows.'},
     volts: {type: 'number', description: 'Nominal voltage from the label, if known (usually 3.6 or 3.7).'},
     wh: {type: 'number', description: 'Capacity in Wh, if the label shows it.'},
@@ -87,7 +88,7 @@ async function loadContext(kb: ContextMcp, data: ContextMcp): Promise<Context> {
   if (cachedContext && Date.now() - cachedContext.at < CONTEXT_TTL_MS) return cachedContext
   const [outline, docs] = await Promise.all([
     kb.callTool('initial_context', {}),
-    groq(data, '*[_type in ["source", "batteryRule"]]{title, "page": select(_type == "source" => {title, url}, source->{title, url})}'),
+    groq(data, '*[_type in ["source", "batteryRule"]]{title, "page": select(_type == "source" => {title, url, kind}, source->{title, url, kind})}'),
   ])
   const kbId = outline.text.match(/\bkb[a-zA-Z0-9]+/)?.[0]
   if (!kbId) throw new Error('No Knowledge Base id in initial context')
@@ -133,7 +134,7 @@ export async function ask(env: Env, question: string, onEvent: (event: AgentEven
     }
     return result.output.slice(0, MAX_TOOL_OUTPUT)
   }
-  const done = (text: string, model: string): Answer => ({answer: finishAnswer(text), steps, model, sources: [...sources.values()], report, usage})
+  const done = (text: string, model: string): Answer => ({answer: finishAnswer(text), steps, model, sources: officialFirst([...sources.values()]), report, usage})
 
   let planError = ''
   if (env.PLAN_MODEL && planConnected(env)) {
@@ -232,6 +233,14 @@ async function workersAiLoop(env: Env, instructions: string, question: string, u
   return (await run({messages})).text
 }
 
+const KIND_ORDER = ['official', 'news', 'aggregator']
+
+// Official pages first, then news, then third-party copies; the order within each kind is the order they were read.
+export function officialFirst(pages: Page[]): Page[] {
+  const rank = (page: Page) => (KIND_ORDER.includes(page.kind ?? '') ? KIND_ORDER.indexOf(page.kind!) : KIND_ORDER.length)
+  return pages.map((page, index) => ({page, index})).sort((a, b) => rank(a.page) - rank(b.page) || a.index - b.index).map(({page}) => page)
+}
+
 // Some models add citation markers such as 【national_regulators/usa】 despite the prompt; the page lists the sources itself.
 export function finishAnswer(text: string): string {
   const answer = text.replace(/[ \t]*【[^】]*】/g, '').trim()
@@ -251,7 +260,7 @@ async function runTool(call: ToolCall, deps: ToolDeps): Promise<ToolResult> {
       case 'find_rules': {
         const name = String(call.args.authority ?? '')
         const rows = (await groq(deps.data, rulesForAuthorityQuery(name))) as {source?: Page}[]
-        const pages = rows.flatMap((row) => (row.source?.url ? [{title: row.source.title, url: row.source.url}] : []))
+        const pages = rows.flatMap((row) => (row.source?.url ? [{title: row.source.title, url: row.source.url, kind: row.source.kind}] : []))
         return {output: rows.length ? JSON.stringify(rows, null, 1) : `No rules stored for "${name}".`, summary: `Rules for "${name}": ${rows.length} found`, pages}
       }
       case 'compare_rules':
@@ -281,7 +290,7 @@ async function runTool(call: ToolCall, deps: ToolDeps): Promise<ToolResult> {
   }
 }
 
-export type Quote = {field: string; text: string; source?: {title: string; url: string}}
+export type Quote = {field: string; text: string; source?: Page}
 type StoredRule = Rule & {quotes?: Quote[]}
 type Grounded = Finding & {quotes: Quote[]}
 
@@ -295,7 +304,7 @@ export type RuleReport = {
   reasons: Grounded[]
   advisories: Grounded[]
   note?: string
-  source?: {title: string; url: string}
+  source?: Page
 }
 
 export type CheckReport = {battery: Battery; overall: Verdict; decidedBy?: string; rules: RuleReport[]; guidance: RuleReport[]; unmatched: string[]}
@@ -364,8 +373,8 @@ function authorityCondition(name: string): string {
 const RULE_PROJECTION = `{
   title, scope, effectiveFrom, status, limits, onboard, note,
   "authority": authority->{name, kind, country, codes},
-  "source": source->{title, url},
-  "quotes": quotes[]{field, text, "source": source->{title, url}}
+  "source": source->{title, url, kind},
+  "quotes": quotes[]{field, text, "source": source->{title, url, kind}}
 }`
 
 export function applicableRulesQuery(airlines: string[], countries: string[], domestic: boolean): string {
@@ -394,7 +403,7 @@ export type ComparedRule = {title: string; scope: Rule['scope']; status?: Rule['
 export function compareRulesQuery(field: OnboardField): string {
   return `*[_type == "batteryRule"]{
   title, scope, status, "value": onboard.${field}, "authority": authority->name,
-  "source": source->{title, url},
+  "source": source->{title, url, kind},
   "quotes": quotes[field == "onboard.${field}"]{text}
 } | order(authority asc)`
 }
@@ -426,7 +435,7 @@ export function describeComparison(field: string, rows: ComparedRule[]): ToolRes
     }
   }
   if (silent.length) lines.push(`not stated: ${[...new Set(silent)].join(', ')}`)
-  const pages = stated.flatMap((row) => (row.source?.url ? [{title: row.source.title, url: row.source.url}] : []))
+  const pages = stated.flatMap((row) => (row.source?.url ? [row.source] : []))
   const counts = values.map((value) => `${groups.get(value)!.length} ${value}`).join(', ')
   return {output: lines.join('\n'), summary: `Compared ${rows.length} rules on ${field}: ${counts || 'none set'}`, pages}
 }
@@ -479,16 +488,16 @@ Answer only from the tools, never from memory. Airline pages, regulators and new
 Today: ${now.toISOString().slice(0, 10)}.
 
 Tools:
-- check_power_bank: for every "can I bring" question. It converts mAh to Wh and evaluates each applicable rule in code. Never convert units or compare limits yourself. Pass every airline on the itinerary and every departure country.
+- check_power_bank: for every "can I bring" question that gives a capacity (mAh or Wh). It converts mAh to Wh and evaluates each applicable rule in code. Never convert units or compare limits yourself. Pass every airline on the itinerary and every departure country. Without a capacity, use find_rules or compare_rules instead.
 - find_rules: one authority's rules with the exact quoted wording behind each field.
 - compare_rules: one on-board condition (overhead bin, in-flight use, recharging, checked baggage, ...) across every stored airline and regulator, for questions such as "which airlines...". Name every airline it returns under what that airline says, mark disputed or unverified rules as such, and mention regulators separately (they bind flights departing their country).
-- read_entries / search_entries: the Knowledge Base, built from official pages, news and third-party copies, with conflicts between them reviewed. Use it for questions about why rules differ, what changed, and which source to trust.
+- read_entries / search_entries: the Knowledge Base, built from official pages, news and third-party copies, with conflicts between them reviewed. Use it for questions about why rules differ, what changed, and which source to trust, and for banned or recalled models and certification marks (such as China's 3C), which the structured rules do not list.
 - run_groq: read-only GROQ on the dataset, only when nothing else answers.
 
 How to answer, in plain sentences for a traveller:
 1. Start with the verdict in one sentence that follows the tool's overall line (for example "Yes, you can bring it, but not in checked baggage."), then one line per rule that decides it. Guidance from IATA or EASA does not count towards the verdict; mention it only when it changes what the traveller should do.
 2. List the on-board conditions the tools return (no in-flight use, not in the overhead bin, cover the terminals).
-3. Name the authority behind every rule. Rules differ by authority: never apply one authority's rule to another, and never turn a recommendation ("should not") into a ban ("must not").
+3. Name the authority behind every rule and give that authority's own finding. Rules differ by authority: never apply one authority's rule to another. Keep each rule's strength exactly as the tools give it: a ban ("must not", "do not") stays a ban and a recommendation ("should not") stays a recommendation, in your first sentence too: when only a recommendation applies, say it is advised against, not that it is banned or "No". ICAO's rules are the worldwide baseline and bind every flight; only IATA's and EASA's guidance is advisory.
 4. When sources disagree (a rule with status "disputed", or an entry that reports conflicting claims), show both claims with their authorities and say which one the Knowledge Base treats as ground truth and why.
 5. If an airline has no stored rule, say so and point to that airline's own page.
 6. Do not write URLs, citation markers or a list of sources; the page lists every source you read under your answer. No tables.

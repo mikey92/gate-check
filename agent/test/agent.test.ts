@@ -1,7 +1,7 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {parseMessage} from '../src/mcp.ts'
-import {applicableRulesQuery, compareRules, CLOSING, describeComparison, finishAnswer, kbSourceTitles, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
+import {applicableRulesQuery, compareRules, CLOSING, describeComparison, finishAnswer, kbSourceTitles, normalize, officialFirst, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
 import {describeRule, evaluate, strictest, toWattHours, type Finding, type Rule} from '../src/rules.ts'
 import {outputText, readCompleted, replayable} from '../src/plan.ts'
 import {offTopic} from '../src/guard.ts'
@@ -216,4 +216,10 @@ test('refuses questions about the service itself, and questions off the topic', 
     '보조배터리 2개 기내 반입 되나요?',
     'Is a 99 Wh battery OK in carry-on to Tokyo?',
   ]) assert.equal(offTopic(question), false, question)
+})
+
+test('lists official pages first, then news, then third-party copies', () => {
+  const page = (title: string, kind?: string) => ({title, url: `https://example.com/${title}`, kind})
+  const ordered = officialFirst([page('blog', 'aggregator'), page('airline', 'official'), page('paper', 'news'), page('ministry', 'official'), page('unknown')])
+  assert.deepEqual(ordered.map((p) => p.title), ['airline', 'ministry', 'paper', 'blog', 'unknown'])
 })

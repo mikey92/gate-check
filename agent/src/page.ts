@@ -45,6 +45,7 @@ export const page = `<!doctype html>
   .sub { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 10px 0 2px !important; }
   details { margin-top: 12px; color: var(--muted); font-size: 14px; }
   details li { margin: 4px 0; word-break: break-word; }
+  .kind { color: var(--muted); font-size: 13px; }
   .error { color: var(--bad); }
   .live { color: var(--muted); }
   .out ul.steps { list-style: none; padding-left: 0; color: var(--muted); font-size: 14px; }
@@ -131,7 +132,11 @@ async function ask() {
   const tick = setInterval(() => { const t = document.getElementById('tick'); if (t) t.textContent = Math.round((Date.now() - started) / 1000) + 's'; }, 500);
   const finish = (data) => {
     const steps = data.steps.map((s) => '<li><b>' + esc(s.tool) + '</b> — ' + esc(s.summary) + '</li>').join('');
-    const sources = (data.sources || []).length ? '<p class="sub">Pages behind this answer</p><ul>' + data.sources.map((s) => '<li>' + link(s) + '</li>').join('') + '</ul>' : '';
+    // Broad questions can rest on thirty pages: the first six show, the rest fold away.
+    const pages = data.sources || [];
+    const list = (items) => '<ul>' + items.map((s) => '<li>' + link(s) + '</li>').join('') + '</ul>';
+    const more = pages.length > 6 ? '<details><summary>Show ' + (pages.length - 6) + ' more pages</summary>' + list(pages.slice(6)) + '</details>' : '';
+    const sources = pages.length ? '<p class="sub">Pages behind this answer</p>' + list(pages.slice(0, 6)) + more : '';
     const engine = data.report ? '<details><summary>The rule engine’s check, rule by rule</summary>' + renderReport(data.report) + '</details>' : '';
     const how = data.steps.length + (data.steps.length === 1 ? ' tool call, ' : ' tool calls, ') + (data.ms / 1000).toFixed(1) + 's' + (data.cached ? ' when first asked, saved answer' : '') + ', ' + esc(data.model);
     out.innerHTML = render(data.answer) + sources + engine + '<details><summary>What the agent did (' + how + ')</summary><ol>' + steps + '</ol></details>';
@@ -176,7 +181,8 @@ function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const VERDICTS = { allowed: ['ok', 'Allowed'], conditions: ['ok', 'Conditions only'], approval: ['warn', 'Needs airline approval'], forbidden: ['bad', 'Not allowed'], unknown: ['warn', 'Unknown'] };
 const SCOPES = { carrier: 'airline rule', departing: 'departure country', domestic: 'domestic flights', worldwide: 'worldwide standard', guidance: 'guidance, not counted' };
 function pill(verdict, big) { const v = VERDICTS[verdict] || VERDICTS.unknown; return '<span class="pill ' + v[0] + (big ? ' big' : '') + '">' + v[1] + '</span>'; }
-function link(source) { return source ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.title) + '</a>' : ''; }
+const KINDS = {news: 'news', aggregator: 'third-party copy'};
+function link(source) { return source ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.title) + '</a>' + (KINDS[source.kind] ? ' <span class="kind">(' + KINDS[source.kind] + ')</span>' : '') : ''; }
 function quote(q) { return '<blockquote>“' + esc(q.text) + '” — ' + link(q.source) + '</blockquote>'; }
 function ruleCard(r) {
   const meta = [SCOPES[r.scope] || r.scope, r.effectiveFrom ? 'effective ' + r.effectiveFrom : ''].filter(Boolean).map(esc).join(' · ')
