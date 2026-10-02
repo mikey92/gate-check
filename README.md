@@ -9,7 +9,7 @@ Power bank rules changed fast in 2025 and 2026. ICAO limited power banks to two 
 Gate Check does that with two kinds of content:
 
 - **Structured rules** (`batteryRule`): the watt-hour bands, count limits and on-board conditions of each authority. Every field is backed by a quote copied from a captured page, and the dataset build fails if one is missing. Code converts mAh to Wh and evaluates every applicable rule; the strictest one decides.
-- **A Knowledge Base** built from the same rules and the captured pages themselves (official pages, news, third-party copies). Sanity Context found five conflicts between them; two were resolved as standing instructions, three were differences between authorities and are described in the Knowledge Base's purpose.
+- **A Knowledge Base** built from the same rules and the captured pages themselves (official pages, news, third-party copies). Sanity Context files every conflict it finds as an issue: real errors became standing instructions, differences between authorities were dismissed and described in the Knowledge Base's purpose, and facts the entries kept getting wrong became manual instructions. No issue is pending.
 
 ## How it works
 
