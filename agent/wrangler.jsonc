@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gate-check",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  "observability": {"enabled": true},
+  "ai": {"binding": "AI"},
+  // Protects the free Workers AI allocation: at most 6 questions per minute per visitor.
+  "ratelimits": [{"name": "LIMITER", "namespace_id": "1001", "simple": {"limit": 6, "period": 60}}],
+  "vars": {
+    "KB_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-rules",
+    "DATA_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-data",
+    "MODEL": "@cf/google/gemma-4-26b-a4b-it"
+  }
+  // SANITY_CONTEXT_TOKEN is a secret: wrangler secret put SANITY_CONTEXT_TOKEN
+}
