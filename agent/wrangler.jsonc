@@ -14,10 +14,9 @@
     "DATA_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-data",
     // The agent runs on the owner's ChatGPT plan through the relay (relay/plan-relay.mjs);
     // MODEL on Workers AI answers when the relay is unreachable.
-    "PLAN_RELAY_URL": "https://gate-check-plan.snack-wrap.com",
     "PLAN_MODEL": "gpt-5.5",
     "PLAN_EFFORT": "low",
     "MODEL": "@cf/nvidia/nemotron-3-120b-a12b"
   }
-  // Secrets: SANITY_CONTEXT_TOKEN, and PLAN_RELAY_KEY (the relay's shared key)
+  // Secrets: SANITY_CONTEXT_TOKEN, PLAN_RELAY_URL and PLAN_RELAY_KEY (the relay's address and shared key)
 }

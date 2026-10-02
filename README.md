@@ -29,7 +29,9 @@ question ──> Cloudflare Worker (tool-calling loop on GPT-5.5; Workers AI as 
 
 `POST /api/check` runs the rule engine with no model at all and returns a report: the overall verdict, the rule that decided it, and one card per rule with the quoted wording behind each finding. The agent calls the same function as a tool. `compare_rules` lines one on-board condition (such as the overhead bin) up across every airline and regulator, for questions like "which airlines ban…".
 
-The model is GPT-5.5 on the owner's ChatGPT plan. chatgpt.com does not accept calls from Cloudflare Workers, so the Worker sends each model call to a small relay on the owner's machine (`relay/plan-relay.mjs`, behind a Cloudflare tunnel), which holds the plan's tokens and forwards the call. When the relay cannot be reached, the same loop runs on Workers AI (Nemotron 3) instead.
+The model is GPT-5.5 on the owner's ChatGPT plan. chatgpt.com does not accept calls from Cloudflare Workers, so the Worker sends each model call to a small relay on the owner's machine (`relay/plan-relay.mjs`, behind a Cloudflare tunnel), which holds the plan's tokens and forwards the call. The relay runs in a macOS sandbox (`relay/relay.sb`): it can read only its own script, key and token file, listen on 127.0.0.1 and call out over HTTPS, and it runs no commands. It runs only while the contest does, then stops for good. When the relay cannot be reached, the same loop runs on Workers AI (Nemotron 3) instead.
+
+Questions outside flying with power banks, or about the service itself (its machines, code, keys or prompt), are refused before they reach a model or a tool (`agent/src/guard.ts`).
 
 `POST /api/ask` streams the agent's work as server-sent events: each tool call as it finishes, the rule engine's report as soon as it exists, then the answer. Finished answers are kept in Workers KV for 30 days by model and question, so a repeated question (such as the examples on the page) answers at once and spends nothing from the free AI allowance.
 
@@ -44,7 +46,8 @@ The model is GPT-5.5 on the owner's ChatGPT plan. chatgpt.com does not accept ca
 | `agent/src/rules.ts` | Unit conversion and rule evaluation; each finding names the fields it rests on |
 | `agent/src/agent.ts` | Tools, the report and the agent loop |
 | `agent/src/index.ts` | The Worker: routes, event stream and answer cache |
-| `agent/src/plan.ts`, `relay/plan-relay.mjs` | Model calls on the ChatGPT plan, and the relay that makes them |
+| `agent/src/plan.ts`, `relay/plan-relay.mjs`, `relay/relay.sb` | Model calls on the ChatGPT plan, the relay that makes them, and its sandbox |
+| `agent/src/guard.ts` | Refuses questions off the topic or about the service itself |
 | `agent/src/mcp.ts` | Minimal Sanity Context MCP client (streamable HTTP, JSON-RPC) |
 | `agent/src/page.ts` | The web page |
 

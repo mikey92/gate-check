@@ -5,6 +5,10 @@
 //   PORT              local port the tunnel points at (default 8811; the relay listens on 127.0.0.1 only)
 //   CODEX_AUTH        auth.json from `CODEX_HOME=<dir> codex login`, refreshed here before it expires
 //   RELAY_KEY_FILE    shared key; the Worker sends it as x-relay-key (PLAN_RELAY_KEY secret)
+//   END_AT            when to stop for good (ISO time); the relay then exits 0, which launchd leaves stopped
+//
+// It runs under sandbox-exec (relay.sb): it can read only itself, its key and the token file, write only the token file,
+// listen on 127.0.0.1 and make outbound HTTPS calls. It runs no commands and touches nothing else on the machine.
 import {createServer} from 'node:http'
 import {readFileSync, writeFileSync, renameSync} from 'node:fs'
 import {timingSafeEqual} from 'node:crypto'
@@ -18,6 +22,7 @@ const CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann' // Codex's OAuth client, which 
 const REFRESH_BEFORE_MS = 2 * 24 * 60 * 60 * 1000
 const MAX_BODY = 4 * 1024 * 1024
 const MAX_PER_MINUTE = 60 // a ceiling on the plan's use even if the key leaked; the Worker limits each visitor too
+const END_AT = process.env.END_AT ? Date.parse(process.env.END_AT) : Infinity
 
 let refreshing
 const recent = []
@@ -128,4 +133,11 @@ const server = createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, '127.0.0.1', () => log(`plan relay on 127.0.0.1:${PORT}`))
+function stopIfOver() {
+  if (Date.now() < END_AT) return
+  log('past END_AT; stopping for good')
+  process.exit(0)
+}
+stopIfOver()
+setInterval(stopIfOver, 10 * 60 * 1000)
+server.listen(PORT, '127.0.0.1', () => log(`plan relay on 127.0.0.1:${PORT}, until ${process.env.END_AT ?? 'stopped'}`))

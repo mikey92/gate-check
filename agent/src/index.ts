@@ -1,5 +1,6 @@
 import {ask, checkPowerBank, CLOSING, type AgentEvent, type Answer, type Env as AgentEnv} from './agent.ts'
 import {ContextMcp} from './mcp.ts'
+import {OFF_TOPIC_REPLY, offTopic} from './guard.ts'
 import {page} from './page.ts'
 
 // DEBUG_ERRORS is only set on preview versions, to see why a model call failed.
@@ -50,6 +51,12 @@ export default {
     const question = typeof body.question === 'string' ? body.question.trim() : ''
     if (!question || question.length > MAX_QUESTION) {
       return json({error: `Ask a question of 1 to ${MAX_QUESTION} characters.`}, 400)
+    }
+    // Questions outside flying with power banks, or about the service itself, never reach a model or a tool.
+    if (offTopic(question)) {
+      const refused: Result = {answer: OFF_TOPIC_REPLY, steps: [], model: 'topic guard', sources: [], usage: {calls: 0, input: 0, output: 0}, ms: Date.now() - started}
+      if (!(request.headers.get('accept') ?? '').includes('text/event-stream')) return json(refused)
+      return new Response(`event: answer\ndata: ${JSON.stringify(refused)}\n\n`, {headers: {'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache'}})
     }
     // Preview versions may try other models or reasoning levels per request (planModel "" skips the ChatGPT plan),
     // and skip the answer cache with "fresh".

@@ -1,0 +1,21 @@
+; Sandbox for plan-relay.mjs (sandbox-exec -f relay.sb -D NODE_BIN=... -D RELAY_DIR=... -D PORT_RULE=localhost:8811 node ...).
+; The relay may read only the Node binary, its own script and key, read and replace its token file, listen on
+; 127.0.0.1 and call out over HTTPS. Everything else on the machine is denied: other files, commands, other ports.
+(version 1)
+(deny default)
+(import "bsd.sb")
+
+(allow process-exec (literal (param "NODE_BIN")))
+(allow file-read* (literal (param "NODE_BIN")))
+
+(allow file-read-metadata (literal (param "RELAY_DIR")))
+(allow file-read* (literal (param "RELAY_SCRIPT")) (literal (param "RELAY_KEY")))
+(allow file-read* file-write* (literal (param "RELAY_AUTH")) (literal (param "RELAY_AUTH_TMP")))
+
+(allow network-bind (local ip (param "PORT_RULE")))
+(allow network-inbound (local ip (param "PORT_RULE")))
+(allow network-outbound (remote ip "*:443"))
+(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+(allow mach-lookup (global-name "com.apple.dnssd.service"))
+(allow system-socket)
+(allow sysctl-read)

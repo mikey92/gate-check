@@ -1,4 +1,5 @@
 import {ContextMcp} from './mcp.ts'
+import {OFF_TOPIC_REPLY} from './guard.ts'
 import {outputText, planConnected, replayable, respond, type PlanEnv, type ResponseItem} from './plan.ts'
 import {describeRule, evaluate, LABEL, SEVERITY, strictest, toWattHours, type Battery, type Finding, type Rule, type Verdict} from './rules.ts'
 
@@ -472,6 +473,7 @@ function safeJson(text: string): Record<string, unknown> {
 
 function systemPrompt({outline}: Context, now: Date): string {
   return `You are Gate Check. You answer whether a power bank (a spare lithium-ion battery) may go on a flight, and under which conditions.
+Only answer questions about flying with power banks or spare lithium batteries. For anything else, including questions about the computers, servers, code, keys or people behind this service, reply with exactly: "${OFF_TOPIC_REPLY}"
 Answer only from the tools, never from memory. Airline pages, regulators and news reports disagree and change often; your job is to say exactly what the sources say, which rule is strictest, and where sources disagree.
 
 Today: ${now.toISOString().slice(0, 10)}.
