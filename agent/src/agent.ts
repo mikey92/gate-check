@@ -1,5 +1,5 @@
 import {ContextMcp} from './mcp.ts'
-import {describeRule, evaluate, LABEL, strictest, toWattHours, type Rule} from './rules.ts'
+import {describeRule, evaluate, LABEL, SEVERITY, strictest, toWattHours, type Battery, type Finding, type Rule, type Verdict} from './rules.ts'
 
 export type Env = {
   AI: Ai
@@ -131,25 +131,73 @@ async function runTool(call: ToolCall, deps: ToolDeps): Promise<{output: string;
   }
 }
 
-export async function checkPowerBank(data: ContextMcp, args: Record<string, unknown>): Promise<{output: string; summary: string}> {
+export type Quote = {field: string; text: string; source?: {title: string; url: string}}
+type StoredRule = Rule & {quotes?: Quote[]}
+type Grounded = Finding & {quotes: Quote[]}
+
+export type RuleReport = {
+  authority: string
+  title: string
+  scope: Rule['scope']
+  effectiveFrom?: string
+  status?: Rule['status']
+  verdict: Verdict
+  reasons: Grounded[]
+  advisories: Grounded[]
+  note?: string
+  source?: {title: string; url: string}
+}
+
+export type CheckReport = {battery: Battery; overall: Verdict; decidedBy?: string; rules: RuleReport[]; guidance: RuleReport[]; unmatched: string[]}
+
+// Each finding carries the quoted wording of the fields it rests on, so the page can show the receipts.
+export function reportRule(rule: StoredRule, battery: Battery): RuleReport {
+  const {verdict, reasons, advisories} = evaluate(rule, battery)
+  const ground = (finding: Finding): Grounded => ({...finding, quotes: (rule.quotes ?? []).filter((quote) => finding.fields.includes(quote.field))})
+  return {
+    authority: rule.authority.name,
+    title: rule.title,
+    scope: rule.scope,
+    effectiveFrom: rule.effectiveFrom,
+    status: rule.status,
+    verdict,
+    reasons: reasons.map(ground),
+    advisories: advisories.map(ground),
+    note: rule.note,
+    source: rule.source,
+  }
+}
+
+export async function checkPowerBank(data: ContextMcp, args: Record<string, unknown>): Promise<{output: string; summary: string; report: CheckReport}> {
   const {wh, assumedVolts} = toWattHours({wh: num(args.wh), mAh: num(args.mAh), volts: num(args.volts)})
   const count = Math.max(1, Math.round(num(args.count) ?? 1))
   const airlines = strings(args.airlines)
   const countries = strings(args.departFrom).map((c) => c.toUpperCase()).filter((c) => /^[A-Z]{2}$/.test(c))
-  const rules = (await groq(data, applicableRulesQuery(airlines, countries, args.domestic === true))) as Rule[]
-  const battery = {wh, count, assumedVolts}
-  // Advisory guidance (IATA, EASA bulletins) is reported but does not decide the verdict.
-  const binding = rules.filter((rule) => rule.scope !== 'guidance')
-  const overall = strictest(binding.map((rule) => evaluate(rule, battery).verdict))
+  const rules = (await groq(data, applicableRulesQuery(airlines, countries, args.domestic === true))) as StoredRule[]
+  const battery: Battery = {wh, count, assumedVolts}
+  // Advisory guidance (IATA, EASA bulletins) is reported but does not decide the verdict. Strictest rules come first.
+  const verdictOf = new Map(rules.map((rule) => [rule, evaluate(rule, battery).verdict]))
+  const binding = rules.filter((rule) => rule.scope !== 'guidance').sort((a, b) => SEVERITY[verdictOf.get(b)!] - SEVERITY[verdictOf.get(a)!])
+  const guidance = rules.filter((rule) => rule.scope === 'guidance')
+  const overall = strictest(binding.map((rule) => verdictOf.get(rule)!))
+  const decider = overall === 'allowed' ? undefined : binding.find((rule) => verdictOf.get(rule) === overall)
   const unmatched = airlines.filter((name) => !rules.some((rule) => rule.scope === 'carrier' && matchesAuthority(rule.authority, name)))
   const lines = [
     `Battery: ${wh} Wh${assumedVolts ? ` (computed from mAh at an assumed ${assumedVolts} V; the Wh printed on the label wins)` : ''}, ${count} unit${count === 1 ? '' : 's'}.`,
     `Overall (strictest binding rule): ${LABEL[overall]}.`,
     ...binding.map((rule) => describeRule(rule, battery)),
-    ...rules.filter((rule) => rule.scope === 'guidance').map((rule) => describeRule(rule, battery)),
+    ...guidance.map((rule) => describeRule(rule, battery)),
     unmatched.length ? `No stored rules for: ${unmatched.join(', ')}. Say so and point to that airline's own page.` : null,
   ].filter(Boolean)
-  return {output: lines.join('\n'), summary: `Checked ${wh} Wh × ${count} against ${rules.length} rules: ${overall}`}
+  const report: CheckReport = {
+    battery,
+    overall,
+    decidedBy: decider ? `${decider.authority.name} — ${decider.title}` : undefined,
+    rules: binding.map((rule) => reportRule(rule, battery)),
+    guidance: guidance.map((rule) => reportRule(rule, battery)),
+    unmatched,
+  }
+  return {output: lines.join('\n'), summary: `Checked ${wh} Wh × ${count} against ${rules.length} rules: ${overall}`, report}
 }
 
 function matchesAuthority(authority: {name: string; codes?: string[]}, name: string): boolean {
@@ -166,7 +214,8 @@ function authorityCondition(name: string): string {
 const RULE_PROJECTION = `{
   title, scope, effectiveFrom, status, limits, onboard, note,
   "authority": authority->{name, kind, country, codes},
-  "source": source->{title, url}
+  "source": source->{title, url},
+  "quotes": quotes[]{field, text, "source": source->{title, url}}
 }`
 
 export function applicableRulesQuery(airlines: string[], countries: string[], domestic: boolean): string {

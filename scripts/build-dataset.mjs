@@ -108,6 +108,19 @@ const ref = (type, slug) => {
   return {_type: 'reference', _ref: id}
 }
 
+// A rule may only state what a source says: every limit and every on-board condition it sets needs a quote.
+for (const rule of rules) {
+  const quoted = new Set((rule.quotes ?? []).map((quote) => quote.field))
+  const fields = [
+    ...Object.keys(rule.limits ?? {}).map((name) => `limits.${name}`),
+    ...Object.entries(rule.onboard ?? {})
+      .filter(([, value]) => !['unknown', 'allowed'].includes(value))
+      .map(([name]) => `onboard.${name}`),
+  ]
+  const unquoted = fields.filter((field) => !quoted.has(field))
+  if (unquoted.length) throw new Error(`${rule.slug}: no quote for ${unquoted.join(', ')}`)
+}
+
 function quoteText(rule, quote) {
   const label = STATEMENT_LABELS[quote.key]
   if (!label) throw new Error(`${rule}: unknown statement key "${quote.key}"`)

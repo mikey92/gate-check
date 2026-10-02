@@ -1,8 +1,10 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {parseMessage} from '../src/mcp.ts'
-import {applicableRulesQuery, normalize, rulesForAuthorityQuery} from '../src/agent.ts'
-import {describeRule, evaluate, strictest, toWattHours, type Rule} from '../src/rules.ts'
+import {applicableRulesQuery, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
+import {describeRule, evaluate, strictest, toWattHours, type Finding, type Rule} from '../src/rules.ts'
+
+const texts = (findings: Finding[]) => findings.map((finding) => finding.text)
 
 const iata: Rule = {
   title: 'Spare lithium batteries',
@@ -38,8 +40,8 @@ test('places a battery in the free band, the approval band or over the maximum',
 test('applies a total count cap and lists on-board conditions', () => {
   const result = evaluate(strictAirline, {wh: 74, count: 6})
   assert.equal(result.verdict, 'forbidden')
-  assert.match(result.reasons.join(' '), /6 power banks is more than the 5 allowed/)
-  assert.deepEqual(result.advisories, ['do not use it to charge devices during the flight', 'keep it with you, not in the overhead bin'])
+  assert.match(texts(result.reasons).join(' '), /6 power banks is more than the 5 allowed/)
+  assert.deepEqual(texts(result.advisories), ['do not use it to charge devices during the flight', 'keep it with you, not in the overhead bin'])
   assert.equal(evaluate(strictAirline, {wh: 130, count: 3}).verdict, 'forbidden')
 })
 
@@ -55,21 +57,46 @@ test('handles a ceiling with no stated approval, and conditions-only rules', () 
   const japan: Rule = {title: 'Mobile batteries', authority: {name: 'MLIT', kind: 'regulator'}, scope: 'departing', limits: {maxWh: 160, totalMaxCount: 2}}
   const within = evaluate(japan, {wh: 130, count: 2})
   assert.equal(within.verdict, 'allowed')
-  assert.match(within.reasons[0], /does not say whether approval is needed above 100 Wh/)
+  assert.match(within.reasons[0].text, /does not say whether approval is needed above 100 Wh/)
   assert.equal(evaluate(japan, {wh: 161, count: 1}).verdict, 'forbidden')
   assert.equal(evaluate(japan, {wh: 50, count: 3}).verdict, 'forbidden')
   const ccc: Rule = {title: '3C mark', authority: {name: 'CAAC', kind: 'regulator'}, scope: 'domestic', onboard: {certification: 'CCC (3C) mark'}}
   const result = evaluate(ccc, {wh: 74, count: 1})
   assert.equal(result.verdict, 'conditions')
-  assert.deepEqual(result.advisories, ['it must carry the CCC (3C) mark'])
+  assert.deepEqual(texts(result.advisories), ['it must carry the CCC (3C) mark'])
 })
 
 test('separates recommendations from bans', () => {
   const icao: Rule = {title: 'Power banks', authority: {name: 'ICAO', kind: 'regulator'}, scope: 'worldwide', onboard: {useInFlight: 'discouraged', rechargeInFlight: 'forbidden'}}
-  assert.deepEqual(evaluate(icao, {wh: 74, count: 1}).advisories, ['it should not be used to charge devices in flight (a recommendation)', 'do not recharge it from seat power'])
+  assert.deepEqual(texts(evaluate(icao, {wh: 74, count: 1}).advisories), ['it should not be used to charge devices in flight (a recommendation)', 'do not recharge it from seat power'])
   const delta: Rule = {title: 'Power banks', authority: {name: 'Delta', kind: 'airline'}, scope: 'carrier', limits: {freeMaxWh: 100, totalMaxCount: 2}, onboard: {useInFlight: 'restricted'}}
   assert.equal(evaluate(delta, {wh: 130, count: 1}).verdict, 'forbidden')
-  assert.deepEqual(evaluate(delta, {wh: 74, count: 1}).advisories, ['do not use it to charge devices during taxi, take-off or landing'])
+  assert.deepEqual(texts(evaluate(delta, {wh: 74, count: 1}).advisories), ['do not use it to charge devices during taxi, take-off or landing'])
+})
+
+test('names the fields behind each finding, including which count limit applied', () => {
+  assert.deepEqual(evaluate(iata, {wh: 74, count: 1}).reasons, [{text: '74 Wh is within the 100 Wh no-approval limit', fields: ['limits.freeMaxWh']}])
+  assert.deepEqual(evaluate(iata, {wh: 130, count: 3}).reasons.map((reason) => reason.fields), [['limits.freeMaxWh', 'limits.approvalMaxWh'], ['limits.approvalMaxCount']])
+  assert.deepEqual(evaluate(strictAirline, {wh: 74, count: 6}).reasons[1].fields, ['limits.totalMaxCount'])
+  assert.deepEqual(evaluate(strictAirline, {wh: 74, count: 1}).advisories.map((advisory) => advisory.fields), [['onboard.useInFlight'], ['onboard.overheadBin']])
+})
+
+test('attaches the quoted wording behind each finding to the report', () => {
+  const policy = {title: 'Policy page', url: 'https://example.com/policy'}
+  const rule = {
+    ...strictAirline,
+    limits: {freeMaxWh: 100, totalMaxCount: 1},
+    quotes: [
+      {field: 'limits.freeMaxWh', text: 'up to 100 Wh', source: policy},
+      {field: 'limits.totalMaxCount', text: 'one power bank per passenger', source: policy},
+      {field: 'onboard.overheadBin', text: 'not in the overhead bin', source: policy},
+    ],
+  }
+  const report = reportRule(rule, {wh: 74, count: 2})
+  assert.equal(report.verdict, 'forbidden')
+  assert.deepEqual(report.reasons.map((reason) => reason.quotes.map((quote) => quote.text)), [['up to 100 Wh'], ['one power bank per passenger']])
+  assert.deepEqual(report.advisories.map((advisory) => advisory.quotes.length), [0, 1])
+  assert.equal(report.status, 'disputed')
 })
 
 test('describes a rule with its status', () => {

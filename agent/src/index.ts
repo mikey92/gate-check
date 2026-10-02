@@ -33,8 +33,8 @@ export default {
         // /api/check runs the rule engine directly, with no model: the same tool the agent calls.
         if (url.pathname === '/api/check') {
           const data = new ContextMcp(env.DATA_MCP_URL, env.SANITY_CONTEXT_TOKEN)
-          const {output} = await checkPowerBank(data, body)
-          return json({result: output, ms: Date.now() - started})
+          const {output, report} = await checkPowerBank(data, body)
+          return json({result: output, report, ms: Date.now() - started})
         }
         const question = typeof body.question === 'string' ? body.question.trim() : ''
         if (!question || question.length > MAX_QUESTION) {

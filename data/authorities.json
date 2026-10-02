@@ -1,1 +1,354 @@
-[{"slug":"faa","name":"Federal Aviation Administration (FAA)","kind":"regulator","country":"US","codes":["FAA"],"website":"https://www.faa.gov"},{"slug":"tsa","name":"Transportation Security Administration (TSA)","kind":"regulator","country":"US","codes":["TSA"],"website":"https://www.tsa.gov"},{"slug":"iata","name":"International Air Transport Association (IATA)","kind":"industry","codes":["IATA"],"website":"https://www.iata.org"},{"slug":"icao","name":"International Civil Aviation Organization (ICAO)","kind":"regulator","codes":["ICAO"],"website":"https://www.icao.int"},{"slug":"easa","name":"European Union Aviation Safety Agency (EASA)","kind":"regulator","codes":["EASA"],"website":"https://www.easa.europa.eu"},{"slug":"molit-kr","name":"Korea Ministry of Land, Infrastructure and Transport (국토교통부)","kind":"regulator","country":"KR","codes":["MOLIT","국토교통부"],"website":"https://www.molit.go.kr"},{"slug":"incheon-airport","name":"Incheon International Airport Corporation (인천국제공항공사)","kind":"airport","country":"KR","codes":["ICN","Incheon","인천공항"],"website":"https://www.airport.kr"},{"slug":"kac","name":"Korea Airports Corporation (한국공항공사)","kind":"airport","country":"KR","codes":["KAC","한국공항공사","GMP","Gimpo"],"website":"https://www.airport.co.kr"},{"slug":"caac","name":"Civil Aviation Administration of China (CAAC)","kind":"regulator","country":"CN","codes":["CAAC","民航局"],"website":"https://www.caac.gov.cn"},{"slug":"mlit-jp","name":"Japan Ministry of Land, Infrastructure, Transport and Tourism (MLIT)","kind":"regulator","country":"JP","codes":["MLIT","国土交通省"],"website":"https://www.mlit.go.jp"},{"slug":"uk-caa","name":"UK Civil Aviation Authority (CAA)","kind":"regulator","country":"GB","codes":["CAA","UK CAA"],"website":"https://www.caa.co.uk"},{"slug":"hk-cad","name":"Hong Kong Civil Aviation Department (CAD)","kind":"regulator","country":"HK","codes":["CAD"],"website":"https://www.cad.gov.hk"},{"slug":"korean-air","name":"Korean Air","kind":"airline","country":"KR","codes":["KE","Korean Air","대한항공"],"website":"https://www.koreanair.com"},{"slug":"asiana","name":"Asiana Airlines","kind":"airline","country":"KR","codes":["OZ","Asiana","아시아나"],"website":"https://flyasiana.com"},{"slug":"jeju-air","name":"Jeju Air","kind":"airline","country":"KR","codes":["7C","Jeju Air","제주항공"],"website":"https://www.jejuair.net"},{"slug":"delta","name":"Delta Air Lines","kind":"airline","country":"US","codes":["DL","Delta"],"website":"https://www.delta.com"},{"slug":"american","name":"American Airlines","kind":"airline","country":"US","codes":["AA","American"],"website":"https://www.aa.com"},{"slug":"southwest","name":"Southwest Airlines","kind":"airline","country":"US","codes":["WN","Southwest"],"website":"https://www.southwest.com"},{"slug":"emirates","name":"Emirates","kind":"airline","country":"AE","codes":["EK","Emirates"],"website":"https://www.emirates.com"},{"slug":"singapore-airlines","name":"Singapore Airlines","kind":"airline","country":"SG","codes":["SQ","SIA","Singapore Airlines"],"website":"https://www.singaporeair.com"},{"slug":"cathay-pacific","name":"Cathay Pacific","kind":"airline","country":"HK","codes":["CX","Cathay"],"website":"https://www.cathaypacific.com"},{"slug":"eva-air","name":"EVA Air","kind":"airline","country":"TW","codes":["BR","EVA"],"website":"https://www.evaair.com"},{"slug":"china-airlines","name":"China Airlines","kind":"airline","country":"TW","codes":["CI","China Airlines"],"website":"https://www.china-airlines.com"},{"slug":"jal","name":"Japan Airlines (JAL)","kind":"airline","country":"JP","codes":["JL","JAL","Japan Airlines"],"website":"https://www.jal.co.jp"},{"slug":"ana","name":"All Nippon Airways (ANA)","kind":"airline","country":"JP","codes":["NH","ANA","All Nippon"],"website":"https://www.ana.co.jp"},{"slug":"lufthansa-group","name":"Lufthansa Group","kind":"airline","country":"DE","codes":["LH","Lufthansa","LX","Swiss","OS","Austrian","SN","Brussels Airlines"],"website":"https://www.lufthansagroup.com"},{"slug":"air-france","name":"Air France","kind":"airline","country":"FR","codes":["AF","Air France"],"website":"https://www.airfrance.com"},{"slug":"british-airways","name":"British Airways","kind":"airline","country":"GB","codes":["BA","British Airways"],"website":"https://www.britishairways.com"},{"slug":"qantas","name":"Qantas","kind":"airline","country":"AU","codes":["QF","Qantas","Jetstar","JQ"],"website":"https://www.qantas.com"},{"slug":"air-canada","name":"Air Canada","kind":"airline","country":"CA","codes":["AC","Air Canada"],"website":"https://www.aircanada.com"},{"slug":"wego","name":"Wego travel blog","kind":"publisher","codes":[],"website":"https://blog.wego.com"},{"slug":"ymmv","name":"Your Mileage May Vary (blog)","kind":"publisher","codes":[],"website":"https://yourmileagemayvary.com"}]
+[
+  {
+    "slug": "faa",
+    "name": "Federal Aviation Administration (FAA)",
+    "kind": "regulator",
+    "country": "US",
+    "codes": [
+      "FAA"
+    ],
+    "website": "https://www.faa.gov"
+  },
+  {
+    "slug": "tsa",
+    "name": "Transportation Security Administration (TSA)",
+    "kind": "regulator",
+    "country": "US",
+    "codes": [
+      "TSA"
+    ],
+    "website": "https://www.tsa.gov"
+  },
+  {
+    "slug": "iata",
+    "name": "International Air Transport Association (IATA)",
+    "kind": "industry",
+    "codes": [
+      "IATA"
+    ],
+    "website": "https://www.iata.org"
+  },
+  {
+    "slug": "icao",
+    "name": "International Civil Aviation Organization (ICAO)",
+    "kind": "regulator",
+    "codes": [
+      "ICAO"
+    ],
+    "website": "https://www.icao.int"
+  },
+  {
+    "slug": "easa",
+    "name": "European Union Aviation Safety Agency (EASA)",
+    "kind": "regulator",
+    "codes": [
+      "EASA"
+    ],
+    "website": "https://www.easa.europa.eu"
+  },
+  {
+    "slug": "molit-kr",
+    "name": "Korea Ministry of Land, Infrastructure and Transport (국토교통부)",
+    "kind": "regulator",
+    "country": "KR",
+    "codes": [
+      "MOLIT",
+      "국토교통부"
+    ],
+    "website": "https://www.molit.go.kr"
+  },
+  {
+    "slug": "incheon-airport",
+    "name": "Incheon International Airport Corporation (인천국제공항공사)",
+    "kind": "airport",
+    "country": "KR",
+    "codes": [
+      "ICN",
+      "Incheon",
+      "인천공항"
+    ],
+    "website": "https://www.airport.kr"
+  },
+  {
+    "slug": "kac",
+    "name": "Korea Airports Corporation (한국공항공사)",
+    "kind": "airport",
+    "country": "KR",
+    "codes": [
+      "KAC",
+      "한국공항공사",
+      "GMP",
+      "Gimpo"
+    ],
+    "website": "https://www.airport.co.kr"
+  },
+  {
+    "slug": "caac",
+    "name": "Civil Aviation Administration of China (CAAC)",
+    "kind": "regulator",
+    "country": "CN",
+    "codes": [
+      "CAAC",
+      "民航局"
+    ],
+    "website": "https://www.caac.gov.cn"
+  },
+  {
+    "slug": "mlit-jp",
+    "name": "Japan Ministry of Land, Infrastructure, Transport and Tourism (MLIT)",
+    "kind": "regulator",
+    "country": "JP",
+    "codes": [
+      "MLIT",
+      "国土交通省"
+    ],
+    "website": "https://www.mlit.go.jp"
+  },
+  {
+    "slug": "uk-caa",
+    "name": "UK Civil Aviation Authority (CAA)",
+    "kind": "regulator",
+    "country": "GB",
+    "codes": [
+      "CAA",
+      "UK CAA"
+    ],
+    "website": "https://www.caa.co.uk"
+  },
+  {
+    "slug": "hk-cad",
+    "name": "Hong Kong Civil Aviation Department (CAD)",
+    "kind": "regulator",
+    "country": "HK",
+    "codes": [
+      "CAD"
+    ],
+    "website": "https://www.cad.gov.hk"
+  },
+  {
+    "slug": "korean-air",
+    "name": "Korean Air",
+    "kind": "airline",
+    "country": "KR",
+    "codes": [
+      "KE",
+      "Korean Air",
+      "대한항공"
+    ],
+    "website": "https://www.koreanair.com"
+  },
+  {
+    "slug": "asiana",
+    "name": "Asiana Airlines",
+    "kind": "airline",
+    "country": "KR",
+    "codes": [
+      "OZ",
+      "Asiana",
+      "아시아나"
+    ],
+    "website": "https://flyasiana.com"
+  },
+  {
+    "slug": "jeju-air",
+    "name": "Jeju Air",
+    "kind": "airline",
+    "country": "KR",
+    "codes": [
+      "7C",
+      "Jeju Air",
+      "제주항공"
+    ],
+    "website": "https://www.jejuair.net"
+  },
+  {
+    "slug": "delta",
+    "name": "Delta Air Lines",
+    "kind": "airline",
+    "country": "US",
+    "codes": [
+      "DL",
+      "Delta"
+    ],
+    "website": "https://www.delta.com"
+  },
+  {
+    "slug": "american",
+    "name": "American Airlines",
+    "kind": "airline",
+    "country": "US",
+    "codes": [
+      "AA",
+      "American"
+    ],
+    "website": "https://www.aa.com"
+  },
+  {
+    "slug": "southwest",
+    "name": "Southwest Airlines",
+    "kind": "airline",
+    "country": "US",
+    "codes": [
+      "WN",
+      "Southwest"
+    ],
+    "website": "https://www.southwest.com"
+  },
+  {
+    "slug": "emirates",
+    "name": "Emirates",
+    "kind": "airline",
+    "country": "AE",
+    "codes": [
+      "EK",
+      "Emirates"
+    ],
+    "website": "https://www.emirates.com"
+  },
+  {
+    "slug": "singapore-airlines",
+    "name": "Singapore Airlines",
+    "kind": "airline",
+    "country": "SG",
+    "codes": [
+      "SQ",
+      "SIA",
+      "Singapore Airlines"
+    ],
+    "website": "https://www.singaporeair.com"
+  },
+  {
+    "slug": "cathay-pacific",
+    "name": "Cathay Pacific",
+    "kind": "airline",
+    "country": "HK",
+    "codes": [
+      "CX",
+      "Cathay"
+    ],
+    "website": "https://www.cathaypacific.com"
+  },
+  {
+    "slug": "eva-air",
+    "name": "EVA Air",
+    "kind": "airline",
+    "country": "TW",
+    "codes": [
+      "BR",
+      "EVA"
+    ],
+    "website": "https://www.evaair.com"
+  },
+  {
+    "slug": "china-airlines",
+    "name": "China Airlines",
+    "kind": "airline",
+    "country": "TW",
+    "codes": [
+      "CI",
+      "China Airlines"
+    ],
+    "website": "https://www.china-airlines.com"
+  },
+  {
+    "slug": "jal",
+    "name": "Japan Airlines (JAL)",
+    "kind": "airline",
+    "country": "JP",
+    "codes": [
+      "JL",
+      "JAL",
+      "Japan Airlines"
+    ],
+    "website": "https://www.jal.co.jp"
+  },
+  {
+    "slug": "ana",
+    "name": "All Nippon Airways (ANA)",
+    "kind": "airline",
+    "country": "JP",
+    "codes": [
+      "NH",
+      "ANA",
+      "All Nippon"
+    ],
+    "website": "https://www.ana.co.jp"
+  },
+  {
+    "slug": "lufthansa-group",
+    "name": "Lufthansa Group",
+    "kind": "airline",
+    "country": "DE",
+    "codes": [
+      "LH",
+      "Lufthansa",
+      "LX",
+      "Swiss",
+      "OS",
+      "Austrian",
+      "SN",
+      "Brussels Airlines"
+    ],
+    "website": "https://www.lufthansagroup.com"
+  },
+  {
+    "slug": "air-france",
+    "name": "Air France",
+    "kind": "airline",
+    "country": "FR",
+    "codes": [
+      "AF",
+      "Air France"
+    ],
+    "website": "https://www.airfrance.com"
+  },
+  {
+    "slug": "british-airways",
+    "name": "British Airways",
+    "kind": "airline",
+    "country": "GB",
+    "codes": [
+      "BA",
+      "British Airways"
+    ],
+    "website": "https://www.britishairways.com"
+  },
+  {
+    "slug": "qantas",
+    "name": "Qantas",
+    "kind": "airline",
+    "country": "AU",
+    "codes": [
+      "QF",
+      "Qantas",
+      "Jetstar",
+      "JQ"
+    ],
+    "website": "https://www.qantas.com"
+  },
+  {
+    "slug": "air-canada",
+    "name": "Air Canada",
+    "kind": "airline",
+    "country": "CA",
+    "codes": [
+      "AC",
+      "Air Canada"
+    ],
+    "website": "https://www.aircanada.com"
+  },
+  {
+    "slug": "wego",
+    "name": "Wego travel blog",
+    "kind": "publisher",
+    "codes": [],
+    "website": "https://blog.wego.com"
+  },
+  {
+    "slug": "ymmv",
+    "name": "Your Mileage May Vary (blog)",
+    "kind": "publisher",
+    "codes": [],
+    "website": "https://yourmileagemayvary.com"
+  }
+]

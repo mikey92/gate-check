@@ -28,7 +28,21 @@ export const page = `<!doctype html>
   .out p { margin: 0 0 10px; }
   .out ul { margin: 0 0 10px; padding-left: 20px; }
   .out a { color: var(--accent); }
-  .ok { color: var(--ok); font-weight: 700; } .warn { color: var(--warn); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+  .pill.ok { color: var(--ok); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+  .pill.big { font-size: 15px; padding: 5px 14px; }
+  .verdict { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .battery { color: var(--muted); font-size: 14px; }
+  .rule { border-top: 1px solid var(--line); padding: 14px 0 6px; }
+  .rule-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .flag { color: var(--warn); font-weight: 600; }
+  .out .rule ul { margin: 8px 0; }
+  .rule li { margin: 4px 0; }
+  blockquote { margin: 6px 0 4px; padding: 4px 10px; border-left: 3px solid var(--line); color: var(--muted); font-size: 14px; }
+  .note { font-size: 14px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; }
+  .src { font-size: 14px; color: var(--muted); }
+  .sub { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 10px 0 2px !important; }
   details { margin-top: 12px; color: var(--muted); font-size: 14px; }
   details li { margin: 4px 0; word-break: break-word; }
   .error { color: var(--bad); }
@@ -98,7 +112,7 @@ document.getElementById('check').onsubmit = async (e) => {
     const res = await fetch('/api/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
-    out.innerHTML = '<pre>' + colour(esc(data.result)) + '</pre>';
+    out.innerHTML = data.report ? renderReport(data.report) : '<pre>' + esc(data.result) + '</pre>';
   } catch (err) { out.innerHTML = '<p class="error">' + esc(err.message) + '</p>'; }
   finally { go.disabled = false; }
 };
@@ -120,11 +134,31 @@ async function ask() {
 }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function colour(s) {
-  return s.replace(/NOT ALLOWED/g, '<span class="bad">NOT ALLOWED</span>')
-    .replace(/NEEDS AIRLINE APPROVAL/g, '<span class="warn">NEEDS AIRLINE APPROVAL</span>')
-    .replace(/UNKNOWN/g, '<span class="warn">UNKNOWN</span>')
-    .replace(/(^|[^>])ALLOWED/g, '$1<span class="ok">ALLOWED</span>');
+// The rule engine's report: one card per rule, strictest first, each finding with the quoted wording it rests on.
+const VERDICTS = { allowed: ['ok', 'Allowed'], conditions: ['ok', 'Conditions only'], approval: ['warn', 'Needs airline approval'], forbidden: ['bad', 'Not allowed'], unknown: ['warn', 'Unknown'] };
+const SCOPES = { carrier: 'airline rule', departing: 'departure country', domestic: 'domestic flights', worldwide: 'worldwide standard', guidance: 'guidance, not counted' };
+function pill(verdict, big) { const v = VERDICTS[verdict] || VERDICTS.unknown; return '<span class="pill ' + v[0] + (big ? ' big' : '') + '">' + v[1] + '</span>'; }
+function link(source) { return source ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.title) + '</a>' : ''; }
+function quote(q) { return '<blockquote>“' + esc(q.text) + '” — ' + link(q.source) + '</blockquote>'; }
+function ruleCard(r) {
+  const meta = [SCOPES[r.scope] || r.scope, r.effectiveFrom ? 'effective ' + r.effectiveFrom : ''].filter(Boolean).map(esc).join(' · ')
+    + (r.status === 'disputed' ? ' · <span class="flag">sources disagree</span>' : r.status === 'unverified' ? ' · <span class="flag">unverified</span>' : '');
+  const reasons = r.reasons.map((f) => '<li>' + esc(f.text) + f.quotes.map(quote).join('') + '</li>').join('');
+  const onboard = r.advisories.length ? '<p class="sub">On board</p><ul>' + r.advisories.map((f) => '<li>' + esc(f.text) + '</li>').join('') + '</ul>' : '';
+  const wording = r.advisories.flatMap((f) => f.quotes);
+  const more = wording.length ? '<details><summary>The wording behind these conditions</summary>' + wording.map(quote).join('') + '</details>' : '';
+  return '<article class="rule"><div class="rule-head">' + pill(r.verdict) + '<b>' + esc(r.authority) + '</b><span>' + esc(r.title) + '</span></div>'
+    + '<div class="meta">' + meta + '</div><ul>' + reasons + '</ul>' + onboard + more
+    + (r.note ? '<p class="note">' + esc(r.note) + '</p>' : '')
+    + (r.source ? '<p class="src">Source: ' + link(r.source) + '</p>' : '') + '</article>';
+}
+function renderReport(rep) {
+  const b = rep.battery;
+  const battery = b.wh + ' Wh × ' + b.count + (b.assumedVolts ? ' (computed from mAh at an assumed ' + b.assumedVolts + ' V; the Wh printed on the label wins)' : '');
+  const why = rep.decidedBy ? 'Strictest rule: ' + esc(rep.decidedBy) : rep.rules.length ? 'Every rule below allows it, with the on-board conditions listed.' : 'No binding rule matched this trip.';
+  const unmatched = rep.unmatched.length ? '<p class="note">No stored rules for ' + esc(rep.unmatched.join(', ')) + '. Check that airline’s own page.</p>' : '';
+  const guidance = rep.guidance.length ? '<details><summary>Advisory guidance, not counted in the verdict (' + rep.guidance.length + ')</summary>' + rep.guidance.map(ruleCard).join('') + '</details>' : '';
+  return '<div class="verdict">' + pill(rep.overall, true) + '<span>' + why + '</span></div><p class="battery">' + esc(battery) + '</p>' + unmatched + rep.rules.map(ruleCard).join('') + guidance;
 }
 // Small Markdown subset: paragraphs, bullet lists, bold, inline code and links (http/https only).
 function render(md) {
