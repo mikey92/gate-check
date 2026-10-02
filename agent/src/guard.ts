@@ -8,7 +8,7 @@ const PROBES = new RegExp(
   [
     String.raw`\bmac(book|os|intosh| ?mini| ?studio)?\b`,
     String.raw`\b(your|this|the owner'?s?) (computer|machine|server|laptop|device)\b`,
-    String.raw`\b(relay|tunnel|server|terminal|shell|ssh|sudo|launchd|localhost|hostname|snack-wrap|codex)\b`,
+    String.raw`\b(relay|tunnel|server|terminal|shell|ssh|sudo|launchd|localhost|hostname|codex)\b`,
     String.raw`\bip address\b`,
     String.raw`\b(password|passcode|api[ -]?keys?|secrets?|credentials?|tokens?|cookies?)\b`,
     String.raw`\b(system prompt|your (instructions|prompt|rules|tools)|ignore (all|any|the|previous|prior|above)|jailbreak|developer mode)\b`,
