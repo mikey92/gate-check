@@ -1,4 +1,5 @@
 import {ContextMcp} from './mcp.ts'
+import {outputText, planConnected, replayable, respond, type PlanEnv, type ResponseItem} from './plan.ts'
 import {describeRule, evaluate, LABEL, SEVERITY, strictest, toWattHours, type Battery, type Finding, type Rule, type Verdict} from './rules.ts'
 
 export type Env = {
@@ -8,7 +9,10 @@ export type Env = {
   DATA_MCP_URL: string
   MODEL: string
   REASONING?: string
-}
+  // The owner's ChatGPT plan (see plan.ts): the model and reasoning effort to use on it.
+  PLAN_MODEL?: string
+  PLAN_EFFORT?: string
+} & PlanEnv
 
 export type Step = {tool: string; input: unknown; summary: string}
 export type Page = {title: string; url: string}
@@ -105,6 +109,7 @@ export function kbSourceTitles(entryText: string): string[] {
 }
 
 // onEvent reports each finished tool call (and the rule engine's verdict) while the model is still working.
+// The model runs on the owner's ChatGPT plan when one is connected (PLAN_MODEL), and on Workers AI otherwise or if that fails.
 export async function ask(env: Env, question: string, onEvent: (event: AgentEvent) => void = () => {}, now = new Date()): Promise<Answer> {
   const kb = new ContextMcp(env.KB_MCP_URL, env.SANITY_CONTEXT_TOKEN)
   const data = new ContextMcp(env.DATA_MCP_URL, env.SANITY_CONTEXT_TOKEN)
@@ -112,12 +117,88 @@ export async function ask(env: Env, question: string, onEvent: (event: AgentEven
   const steps: Step[] = []
   const sources = new Map<string, Page>()
   let report: CheckReport | undefined
-  let nudged = false
+  const usage: Usage = {calls: 0, input: 0, output: 0}
+  const instructions = systemPrompt(context, now)
+  // Runs one tool call, reports it, and returns what the model reads back.
+  const use = async (call: ToolCall): Promise<string> => {
+    const result = await runTool(call, {kb, data, kbId: context.kbId, pages: context.pages})
+    for (const page of result.pages ?? []) sources.set(page.url, page)
+    const step = {tool: call.name, input: call.args, summary: result.summary}
+    steps.push(step)
+    onEvent({type: 'step', step})
+    if (result.report) {
+      report = result.report
+      onEvent({type: 'report', report})
+    }
+    return result.output.slice(0, MAX_TOOL_OUTPUT)
+  }
+  const done = (text: string, model: string): Answer => ({answer: finishAnswer(text), steps, model, sources: [...sources.values()], report, usage})
+
+  let planError = ''
+  if (env.PLAN_MODEL && planConnected(env)) {
+    try {
+      return done(await planLoop(env, env.PLAN_MODEL, env.PLAN_EFFORT ?? 'low', instructions, question, use, usage), `${env.PLAN_MODEL} (ChatGPT plan)`)
+    } catch (error) {
+      planError = error instanceof Error ? error.message : String(error)
+      console.error('ChatGPT plan failed; answering with Workers AI:', planError)
+    }
+  }
+  try {
+    return done(await workersAiLoop(env, instructions, question, use, usage), env.MODEL)
+  } catch (error) {
+    if (!planError || !(error instanceof Error)) throw error
+    throw new Error(`${error.message} (after the ChatGPT plan failed: ${planError})`)
+  }
+}
+
+const RESPONSE_TOOLS = TOOLS.map(({function: fn}) => ({type: 'function', ...fn}))
+const WRAP_UP = 'Stop calling tools and answer from what you have read so far.'
+
+async function planLoop(
+  plan: PlanEnv,
+  model: string,
+  effort: string,
+  instructions: string,
+  question: string,
+  use: (call: ToolCall) => Promise<string>,
+  usage: Usage,
+): Promise<string> {
+  const input: ResponseItem[] = [{type: 'message', role: 'user', content: [{type: 'input_text', text: question}]}]
+  const run = async (toolChoice: string) => {
+    const result = await respond(plan, {
+      model,
+      instructions,
+      input,
+      tools: RESPONSE_TOOLS,
+      tool_choice: toolChoice,
+      parallel_tool_calls: true,
+      reasoning: {effort},
+      include: ['reasoning.encrypted_content'],
+    })
+    usage.calls++
+    usage.input += result.usage?.input_tokens ?? 0
+    usage.output += result.usage?.output_tokens ?? 0
+    input.push(...replayable(result.output))
+    return result.output
+  }
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const output = await run('auto')
+    const calls = output.filter((item) => item.type === 'function_call')
+    if (calls.length === 0) return outputText(output)
+    for (const call of calls) {
+      const args = typeof call.arguments === 'string' ? safeJson(call.arguments) : (call.arguments ?? {})
+      input.push({type: 'function_call_output', call_id: call.call_id, output: await use({id: call.call_id, name: call.name, args})})
+    }
+  }
+  input.push({type: 'message', role: 'user', content: [{type: 'input_text', text: WRAP_UP}]})
+  return outputText(await run('none'))
+}
+
+async function workersAiLoop(env: Env, instructions: string, question: string, use: (call: ToolCall) => Promise<string>, usage: Usage): Promise<string> {
   const messages: Record<string, unknown>[] = [
-    {role: 'system', content: systemPrompt(context, now)},
+    {role: 'system', content: instructions},
     {role: 'user', content: question},
   ]
-  const usage: Usage = {calls: 0, input: 0, output: 0}
   const reasoning = REASONING[env.REASONING ?? '']
   const run = async (payload: Record<string, unknown>) => {
     const options = {...payload, max_tokens: 1500, temperature: 0.1, ...(reasoning ? {chat_template_kwargs: reasoning} : {})}
@@ -127,8 +208,7 @@ export async function ask(env: Env, question: string, onEvent: (event: AgentEven
     usage.output += raw?.usage?.completion_tokens ?? 0
     return normalize(raw)
   }
-  const done = (text: string): Answer => ({answer: finishAnswer(text), steps, model: env.MODEL, sources: [...sources.values()], report, usage})
-
+  let nudged = false
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const reply = await run({messages, tools: TOOLS})
     if (reply.calls.length === 0) {
@@ -138,28 +218,17 @@ export async function ask(env: Env, question: string, onEvent: (event: AgentEven
         messages.push({role: 'user', content: 'Write the answer now, from the tool results above.'})
         continue
       }
-      return done(reply.text)
+      return reply.text
     }
     messages.push({
       role: 'assistant',
       content: reply.text,
       tool_calls: reply.calls.map((call) => ({id: call.id, type: 'function', function: {name: call.name, arguments: JSON.stringify(call.args)}})),
     })
-    for (const call of reply.calls) {
-      const result = await runTool(call, {kb, data, kbId: context.kbId, pages: context.pages})
-      for (const page of result.pages ?? []) sources.set(page.url, page)
-      const step = {tool: call.name, input: call.args, summary: result.summary}
-      steps.push(step)
-      onEvent({type: 'step', step})
-      if (result.report) {
-        report = result.report
-        onEvent({type: 'report', report})
-      }
-      messages.push({role: 'tool', tool_call_id: call.id, name: call.name, content: result.output.slice(0, MAX_TOOL_OUTPUT)})
-    }
+    for (const call of reply.calls) messages.push({role: 'tool', tool_call_id: call.id, name: call.name, content: await use(call)})
   }
-  messages.push({role: 'user', content: 'Stop calling tools and answer from what you have read so far.'})
-  return done((await run({messages})).text)
+  messages.push({role: 'user', content: WRAP_UP})
+  return (await run({messages})).text
 }
 
 // Some models add citation markers such as 【national_regulators/usa】 despite the prompt; the page lists the sources itself.

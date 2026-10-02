@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {parseMessage} from '../src/mcp.ts'
 import {applicableRulesQuery, compareRules, CLOSING, describeComparison, finishAnswer, kbSourceTitles, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
 import {describeRule, evaluate, strictest, toWattHours, type Finding, type Rule} from '../src/rules.ts'
+import {outputText, readCompleted, replayable} from '../src/plan.ts'
 
 const texts = (findings: Finding[]) => findings.map((finding) => finding.text)
 
@@ -171,4 +172,28 @@ test('normalizes both Workers AI response shapes', () => {
   const openai = normalize({choices: [{message: {content: 'Hi', tool_calls: [{id: 'a1', function: {name: 'read_entries', arguments: '{"paths":["x"]}'}}]}}]})
   assert.equal(openai.text, 'Hi')
   assert.deepEqual(openai.calls, [{id: 'a1', name: 'read_entries', args: {paths: ['x']}}])
+})
+
+test('reads a ChatGPT plan response from its event stream', async () => {
+  const output = [
+    {id: 'rs_1', type: 'reasoning', encrypted_content: 'x', summary: []},
+    {id: 'fc_1', type: 'function_call', call_id: 'call_1', name: 'compare_rules', arguments: '{"field":"overheadBin"}'},
+    {id: 'msg_1', type: 'message', role: 'assistant', content: [{type: 'output_text', text: 'Korean Air bans it.'}]},
+  ]
+  // The plan's endpoint sends each item in response.output_item.done and leaves response.completed's output empty.
+  const events = [
+    {type: 'response.created', response: {status: 'in_progress'}},
+    ...output.map((item) => ({type: 'response.output_item.done', item})),
+    {type: 'response.output_text.delta', delta: 'Korean'},
+    {type: 'response.completed', response: {output: [], usage: {input_tokens: 120, output_tokens: 30}}},
+  ]
+  const text = events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
+  const stream = new Response(text).body!
+  const result = await readCompleted(stream)
+  assert.equal(result.usage?.output_tokens, 30)
+  assert.equal(outputText(result.output), 'Korean Air bans it.')
+  assert.deepEqual(replayable(result.output).map((item) => item.id), [undefined, undefined, undefined])
+  assert.equal(replayable(result.output)[1].call_id, 'call_1')
+  const failed = new Response(`data: ${JSON.stringify({type: 'response.failed', response: {error: {message: 'usage limit'}}})}\n\n`).body!
+  await assert.rejects(readCompleted(failed), /usage limit/)
 })

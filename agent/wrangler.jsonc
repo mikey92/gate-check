@@ -5,14 +5,19 @@
   "compatibility_date": "2026-09-30",
   "observability": {"enabled": true},
   "ai": {"binding": "AI"},
-  // Protects the free Workers AI allocation: at most 6 questions per minute per visitor.
+  // Protects the model allowance: at most 6 questions per minute per visitor.
   "ratelimits": [{"name": "LIMITER", "namespace_id": "1001", "simple": {"limit": 6, "period": 60}}],
-  // Finished answers, keyed by model and question, kept for a week.
+  // Finished answers, keyed by model and question, kept for 30 days.
   "kv_namespaces": [{"binding": "ANSWERS", "id": "f58f7fffd1bd4fc6a4e4ed161801f0f8"}],
   "vars": {
     "KB_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-rules",
     "DATA_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-data",
+    // The agent runs on the owner's ChatGPT plan through the relay (relay/plan-relay.mjs);
+    // MODEL on Workers AI answers when the relay is unreachable.
+    "PLAN_RELAY_URL": "https://gate-check-plan.snack-wrap.com",
+    "PLAN_MODEL": "gpt-5.5",
+    "PLAN_EFFORT": "low",
     "MODEL": "@cf/nvidia/nemotron-3-120b-a12b"
   }
-  // SANITY_CONTEXT_TOKEN is a secret: wrangler secret put SANITY_CONTEXT_TOKEN
+  // Secrets: SANITY_CONTEXT_TOKEN, and PLAN_RELAY_KEY (the relay's shared key)
 }

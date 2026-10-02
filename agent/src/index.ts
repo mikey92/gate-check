@@ -51,17 +51,22 @@ export default {
     if (!question || question.length > MAX_QUESTION) {
       return json({error: `Ask a question of 1 to ${MAX_QUESTION} characters.`}, 400)
     }
-    // Preview versions may try another model or reasoning level per request, and skip the answer cache with "fresh".
+    // Preview versions may try other models or reasoning levels per request (planModel "" skips the ChatGPT plan),
+    // and skip the answer cache with "fresh".
     const preview = Boolean(env.DEBUG_ERRORS)
-    const model = preview && typeof body.model === 'string' ? body.model : env.MODEL
-    const reasoning = preview && typeof body.reasoning === 'string' ? body.reasoning : env.REASONING
+    const pick = (name: string, fallback?: string) => (preview && typeof body[name] === 'string' ? (body[name] as string) || undefined : fallback)
+    const model = pick('model', env.MODEL) ?? env.MODEL
+    const planModel = pick('planModel', env.PLAN_MODEL)
+    const settings = {...env, MODEL: model, REASONING: pick('reasoning', env.REASONING), PLAN_MODEL: planModel, PLAN_EFFORT: pick('planEffort', env.PLAN_EFFORT)}
+    // Only answers from the intended model are kept, not ones from the Workers AI fallback.
+    const intended = planModel ? `${planModel} (ChatGPT plan)` : model
     const store = preview && body.fresh === true ? undefined : env.ANSWERS
-    const key = await answerKey(model, question)
+    const key = await answerKey(planModel ?? model, question)
     const answer = async (onEvent: (event: AgentEvent) => void): Promise<Result> => {
       const cached = await store?.get<Result>(key, 'json')
       if (cached) return {...cached, cached: true}
-      const result = {...(await ask({...env, MODEL: model, REASONING: reasoning}, question, onEvent)), ms: Date.now() - started}
-      if (store && result.answer.replace(CLOSING, '').trim().length > 20) {
+      const result = {...(await ask(settings, question, onEvent)), ms: Date.now() - started}
+      if (store && result.model === intended && result.answer.replace(CLOSING, '').trim().length > 20) {
         ctx.waitUntil(store.put(key, JSON.stringify(result), {expirationTtl: ANSWER_TTL_SECONDS}))
       }
       return result

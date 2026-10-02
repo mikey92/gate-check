@@ -81,7 +81,7 @@ export const page = `<!doctype html>
     <div id="askOut" class="out"></div>
   </form>
 
-  <footer>Built on Sanity Context (a Knowledge Base endpoint and a GROQ endpoint) and Cloudflare Workers AI. Rules change often: always check with your airline. <a href="https://github.com/mikey92/gate-check">Source</a>.</footer>
+  <footer>Built on Sanity Context (a Knowledge Base endpoint and a GROQ endpoint), GPT-5.5 and Cloudflare Workers. Rules change often: always check with your airline. <a href="https://github.com/mikey92/gate-check">Source</a>.</footer>
 </main>
 <script>
 const examples = [
