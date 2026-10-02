@@ -7,10 +7,12 @@
   "ai": {"binding": "AI"},
   // Protects the free Workers AI allocation: at most 6 questions per minute per visitor.
   "ratelimits": [{"name": "LIMITER", "namespace_id": "1001", "simple": {"limit": 6, "period": 60}}],
+  // Finished answers, keyed by model and question, kept for a week.
+  "kv_namespaces": [{"binding": "ANSWERS", "id": "f58f7fffd1bd4fc6a4e4ed161801f0f8"}],
   "vars": {
     "KB_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-rules",
     "DATA_MCP_URL": "https://api.sanity.io/v1/context/organizations/odt24larb/mcp/gate-check-data",
-    "MODEL": "@cf/google/gemma-4-26b-a4b-it"
+    "MODEL": "@cf/nvidia/nemotron-3-120b-a12b"
   }
   // SANITY_CONTEXT_TOKEN is a secret: wrangler secret put SANITY_CONTEXT_TOKEN
 }

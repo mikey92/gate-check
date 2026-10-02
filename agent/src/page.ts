@@ -46,6 +46,8 @@ export const page = `<!doctype html>
   details { margin-top: 12px; color: var(--muted); font-size: 14px; }
   details li { margin: 4px 0; word-break: break-word; }
   .error { color: var(--bad); }
+  .live { color: var(--muted); }
+  .out ul.steps { list-style: none; padding-left: 0; color: var(--muted); font-size: 14px; }
   footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
   footer a { color: inherit; }
 </style>
@@ -118,20 +120,55 @@ document.getElementById('check').onsubmit = async (e) => {
 };
 
 document.getElementById('ask').onsubmit = (e) => { e.preventDefault(); ask(); };
+// The answer arrives as server-sent events: each tool call as it finishes, the rule engine's verdict, then the answer.
 async function ask() {
   const question = document.getElementById('q').value.trim();
   if (!question) return;
   const go = document.getElementById('askGo'); const out = document.getElementById('askOut');
-  go.disabled = true; go.textContent = 'Reading…'; out.style.display = 'block'; out.innerHTML = '<p>Reading the rules…</p>';
-  try {
-    const res = await fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }) });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
+  go.disabled = true; go.textContent = 'Reading…'; out.style.display = 'block';
+  out.innerHTML = '<p class="live">Reading the rules… <span id="tick">0s</span></p><ul class="steps" id="liveSteps"></ul><div id="liveReport"></div>';
+  const started = Date.now();
+  const tick = setInterval(() => { const t = document.getElementById('tick'); if (t) t.textContent = Math.round((Date.now() - started) / 1000) + 's'; }, 500);
+  const finish = (data) => {
     const steps = data.steps.map((s) => '<li><b>' + esc(s.tool) + '</b> — ' + esc(s.summary) + '</li>').join('');
     const sources = (data.sources || []).length ? '<p class="sub">Pages behind this answer</p><ul>' + data.sources.map((s) => '<li>' + link(s) + '</li>').join('') + '</ul>' : '';
-    out.innerHTML = render(data.answer) + sources + '<details><summary>What the agent did (' + data.steps.length + (data.steps.length === 1 ? ' tool call, ' : ' tool calls, ') + (data.ms / 1000).toFixed(1) + 's, ' + esc(data.model) + ')</summary><ol>' + steps + '</ol></details>';
+    const engine = data.report ? '<details><summary>The rule engine’s check, rule by rule</summary>' + renderReport(data.report) + '</details>' : '';
+    const how = data.steps.length + (data.steps.length === 1 ? ' tool call, ' : ' tool calls, ') + (data.ms / 1000).toFixed(1) + 's' + (data.cached ? ' when first asked, saved answer' : '') + ', ' + esc(data.model);
+    out.innerHTML = render(data.answer) + sources + engine + '<details><summary>What the agent did (' + how + ')</summary><ol>' + steps + '</ol></details>';
+  };
+  const show = (name, data) => {
+    if (name === 'step') {
+      const li = document.createElement('li'); li.textContent = '✓ ' + data.summary;
+      const list = document.getElementById('liveSteps'); if (list) list.appendChild(li);
+    } else if (name === 'report') {
+      const box = document.getElementById('liveReport');
+      if (box) box.innerHTML = '<p class="sub">The rule engine’s verdict, while the agent writes its answer</p>' + renderReport(data);
+    } else if (name === 'answer') finish(data);
+    else if (name === 'error') throw new Error(data.error);
+  };
+  try {
+    const res = await fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'text/event-stream' }, body: JSON.stringify({ question }) });
+    if (!res.ok || !res.body) { const data = await res.json().catch(() => ({})); throw new Error(data.error || res.statusText); }
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); const NL = String.fromCharCode(10);
+    let buffer = ''; let answered = false;
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf(NL + NL)) >= 0) {
+        const block = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
+        let name = ''; let payload = '';
+        for (const line of block.split(NL)) {
+          if (line.startsWith('event: ')) name = line.slice(7);
+          else if (line.startsWith('data: ')) payload += line.slice(6);
+        }
+        if (name && payload) { show(name, JSON.parse(payload)); if (name === 'answer') answered = true; }
+      }
+    }
+    if (!answered) throw new Error('The connection closed before the answer arrived. Please try again.');
   } catch (err) { out.innerHTML = '<p class="error">' + esc(err.message) + '</p>'; }
-  finally { go.disabled = false; go.textContent = 'Ask'; }
+  finally { clearInterval(tick); go.disabled = false; go.textContent = 'Ask'; }
 }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

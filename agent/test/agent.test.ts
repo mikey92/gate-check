@@ -1,7 +1,7 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {parseMessage} from '../src/mcp.ts'
-import {applicableRulesQuery, kbSourceTitles, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
+import {applicableRulesQuery, compareRules, CLOSING, describeComparison, finishAnswer, kbSourceTitles, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
 import {describeRule, evaluate, strictest, toWattHours, type Finding, type Rule} from '../src/rules.ts'
 
 const texts = (findings: Finding[]) => findings.map((finding) => finding.text)
@@ -113,6 +113,36 @@ test('user text enters GROQ only as escaped string literals', () => {
   assert.match(query, /scope == "departing" && authority->country in \["KR","US"\]/)
   assert.doesNotMatch(query, /scope == "domestic"/)
   assert.match(rulesForAuthorityQuery('OZ'), /lower\(@\) == lower\("OZ"\)/)
+})
+
+test('lines one on-board condition up across authorities, strictest first', () => {
+  const page = {title: 'Policy', url: 'https://example.com/policy'}
+  const result = describeComparison('overheadBin', [
+    {title: 'Guidance', scope: 'guidance', status: 'disputed', value: 'discouraged', authority: 'EASA', source: page, quotes: [{text: 'should not be stowed in overhead bins'}]},
+    {title: 'Power banks', scope: 'carrier', status: 'confirmed', value: 'forbidden', authority: 'Korean Air', source: page, quotes: [{text: 'not in the overhead bin'}]},
+    {title: 'Rules', scope: 'carrier', value: 'unknown', authority: 'ANA'},
+    {title: 'Rules', scope: 'departing', authority: 'FAA', source: {title: 'PackSafe', url: 'https://example.com/faa'}},
+  ])
+  assert.deepEqual(result.output.split('\n').slice(1), [
+    'forbidden:',
+    '- Korean Air — Power banks (carrier): "not in the overhead bin"',
+    'discouraged:',
+    '- EASA — Guidance (guidance, status: disputed): "should not be stowed in overhead bins"',
+    'not stated: ANA, FAA',
+  ])
+  assert.equal(result.summary, 'Compared 4 rules on overheadBin: 1 forbidden, 1 discouraged')
+  assert.deepEqual(result.pages, [page, page])
+})
+
+test('compare_rules only queries known on-board fields', async () => {
+  const data = {callTool: () => assert.fail('no query for an unknown field')}
+  const result = await compareRules(data as never, 'overheadBin}[0..9999]{...')
+  assert.match(result.output, /^Unknown field/)
+})
+
+test('strips citation markers and always ends with the closing line', () => {
+  assert.equal(finishAnswer('The FAA does not ban it【national_regulators/usa】.'), `The FAA does not ban it.\n\n${CLOSING}`)
+  assert.equal(finishAnswer(`Yes.\n\n${CLOSING}`), `Yes.\n\n${CLOSING}`)
 })
 
 test('reads the cited document titles from Knowledge Base entries', () => {

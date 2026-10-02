@@ -17,14 +17,17 @@ Gate Check does that with two kinds of content:
 question ──> Cloudflare Worker (tool-calling loop on Workers AI)
                  │
                  ├─ check_power_bank ─┐   rule engine in code (mAh → Wh, bands, counts, strictest wins)
-                 ├─ find_rules        ├──> Sanity Context MCP "gate-check-data"  (GROQ mode)
+                 ├─ find_rules        │
+                 ├─ compare_rules     ├──> Sanity Context MCP "gate-check-data"  (GROQ mode)
                  ├─ run_groq ─────────┘     dataset: authority, batteryRule, source
                  │
                  └─ read_entries / search_entries ──> Sanity Context MCP "gate-check-rules" (Knowledge Base mode)
                                                       Knowledge Base built from 30 rules and 60 captured pages
 ```
 
-`POST /api/check` runs the rule engine with no model at all and returns a report: the overall verdict, the rule that decided it, and one card per rule with the quoted wording behind each finding. The agent calls the same function as a tool.
+`POST /api/check` runs the rule engine with no model at all and returns a report: the overall verdict, the rule that decided it, and one card per rule with the quoted wording behind each finding. The agent calls the same function as a tool. `compare_rules` lines one on-board condition (such as the overhead bin) up across every airline and regulator, for questions like "which airlines ban…".
+
+`POST /api/ask` streams the agent's work as server-sent events: each tool call as it finishes, the rule engine's report as soon as it exists, then the answer. Finished answers are kept in Workers KV for 30 days by model and question, so a repeated question (such as the examples on the page) answers at once and spends nothing from the free AI allowance.
 
 ## Repository
 
@@ -36,6 +39,7 @@ question ──> Cloudflare Worker (tool-calling loop on Workers AI)
 | `scripts/build-dataset.mjs` | Copies quote text from the sources, checks every reference and that every rule field has a quote, and writes `data/dataset.ndjson` |
 | `agent/src/rules.ts` | Unit conversion and rule evaluation; each finding names the fields it rests on |
 | `agent/src/agent.ts` | Tools, the report and the agent loop |
+| `agent/src/index.ts` | The Worker: routes, event stream and answer cache |
 | `agent/src/mcp.ts` | Minimal Sanity Context MCP client (streamable HTTP, JSON-RPC) |
 | `agent/src/page.ts` | The web page |
 
@@ -57,4 +61,4 @@ Sanity project ID `nkpgzr3t`, dataset `production` (public).
 - Rules are a snapshot from the capture date on each source (2 October 2026). Always check with your airline before you fly.
 - When only mAh is given, Wh is computed at 3.7 V; the Wh printed on the battery wins.
 - ICAO's addendum is treated as applying to every trip. National law decides how it applies to purely domestic flights.
-- The demo runs on Cloudflare's free Workers AI allocation and is rate limited.
+- The demo runs on Cloudflare's free Workers AI allocation (10,000 neurons a day) and is rate limited. When the day's allowance is used up, the quick check and saved answers still work.

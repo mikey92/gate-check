@@ -12,16 +12,23 @@ export type Env = {
 export type Step = {tool: string; input: unknown; summary: string}
 export type Page = {title: string; url: string}
 // sources: every page behind the tool results the answer was written from, collected in code rather than by the model.
-export type Answer = {answer: string; steps: Step[]; model: string; sources: Page[]}
+// report: the rule engine's verdict when the agent ran check_power_bank, so the page can show it before the answer.
+// usage: model calls and tokens, which is what the daily free allowance is spent on.
+export type Usage = {calls: number; input: number; output: number}
+export type Answer = {answer: string; steps: Step[]; model: string; sources: Page[]; report?: CheckReport; usage: Usage}
+export type AgentEvent = {type: 'step'; step: Step} | {type: 'report'; report: CheckReport}
 
 type ToolCall = {id: string; name: string; args: Record<string, unknown>}
-type ToolResult = {output: string; summary: string; pages?: Page[]}
+type ToolResult = {output: string; summary: string; pages?: Page[]; report?: CheckReport}
 
 const MAX_TURNS = 6
 const MAX_TOOL_OUTPUT = 12000
 const MAX_ENTRIES_PER_READ = 4
 const CONTEXT_TTL_MS = 10 * 60 * 1000
-const CLOSING = 'Check with your airline before you fly.'
+export const CLOSING = 'Check with your airline before you fly.'
+// The on-board conditions every rule may set; compare_rules lines one of them up across all authorities.
+export const ONBOARD_FIELDS = ['checkedBaggage', 'useInFlight', 'rechargeInFlight', 'overheadBin', 'keepVisible', 'protection', 'labelRequired', 'certification'] as const
+type OnboardField = (typeof ONBOARD_FIELDS)[number]
 
 const TOOLS = [
   tool('check_power_bank', 'Decide whether a power bank may fly. Converts mAh to Wh and evaluates every applicable rule (each airline named, the departure countries\' regulators, and worldwide guidance) in code. Use it for every "can I bring" question.', {
@@ -36,6 +43,13 @@ const TOOLS = [
   tool('find_rules', 'One authority\'s rules with the exact quoted wording behind every field. Use it when asked what an airline or regulator says.', {
     authority: {type: 'string', description: 'Airline or regulator name or code, e.g. "Asiana", "OZ", "FAA".'},
   }, ['authority']),
+  tool('compare_rules', 'One on-board condition across every stored airline and regulator, grouped by what each one says, with the quoted wording. Use it for questions across authorities, e.g. "which airlines ban power banks from the overhead bin".', {
+    field: {
+      type: 'string',
+      enum: [...ONBOARD_FIELDS],
+      description: 'checkedBaggage; useInFlight (charging devices from it in flight); rechargeInFlight (charging it from seat power); overheadBin; keepVisible; protection (covered terminals); labelRequired (printed capacity); certification.',
+    },
+  }, ['field']),
   tool('read_entries', 'Read Knowledge Base entries by path, copied verbatim from the outline. Read the most relevant entries in one call.', {
     paths: {type: 'array', items: {type: 'string'}, description: `Entry paths from the outline, at most ${MAX_ENTRIES_PER_READ}.`},
   }, ['paths']),
@@ -82,38 +96,66 @@ export function kbSourceTitles(entryText: string): string[] {
   return titles
 }
 
-export async function ask(env: Env, question: string, now = new Date()): Promise<Answer> {
+// onEvent reports each finished tool call (and the rule engine's verdict) while the model is still working.
+export async function ask(env: Env, question: string, onEvent: (event: AgentEvent) => void = () => {}, now = new Date()): Promise<Answer> {
   const kb = new ContextMcp(env.KB_MCP_URL, env.SANITY_CONTEXT_TOKEN)
   const data = new ContextMcp(env.DATA_MCP_URL, env.SANITY_CONTEXT_TOKEN)
   const context = await loadContext(kb, data)
   const steps: Step[] = []
   const sources = new Map<string, Page>()
+  let report: CheckReport | undefined
+  let nudged = false
   const messages: Record<string, unknown>[] = [
     {role: 'system', content: systemPrompt(context, now)},
     {role: 'user', content: question},
   ]
-  const done = (text: string): Answer => {
-    const answer = text.trim()
-    return {answer: answer.endsWith(CLOSING) ? answer : `${answer}\n\n${CLOSING}`, steps, model: env.MODEL, sources: [...sources.values()]}
+  const usage: Usage = {calls: 0, input: 0, output: 0}
+  const run = async (payload: Record<string, unknown>) => {
+    const raw = (await env.AI.run(env.MODEL as keyof AiModels, {...payload, max_tokens: 1500, temperature: 0.1} as never)) as {usage?: {prompt_tokens?: number; completion_tokens?: number}}
+    usage.calls++
+    usage.input += raw?.usage?.prompt_tokens ?? 0
+    usage.output += raw?.usage?.completion_tokens ?? 0
+    return normalize(raw)
   }
+  const done = (text: string): Answer => ({answer: finishAnswer(text), steps, model: env.MODEL, sources: [...sources.values()], report, usage})
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const reply = normalize(await env.AI.run(env.MODEL as keyof AiModels, {messages, tools: TOOLS, max_tokens: 1500, temperature: 0.1} as never))
-    if (reply.calls.length === 0) return done(reply.text)
+    const reply = await run({messages, tools: TOOLS})
+    if (reply.calls.length === 0) {
+      // Some models return an empty message right after reading a tool result; ask once for the answer itself.
+      if (!reply.text.trim() && !nudged) {
+        nudged = true
+        messages.push({role: 'user', content: 'Write the answer now, from the tool results above.'})
+        continue
+      }
+      return done(reply.text)
+    }
     messages.push({
       role: 'assistant',
       content: reply.text,
       tool_calls: reply.calls.map((call) => ({id: call.id, type: 'function', function: {name: call.name, arguments: JSON.stringify(call.args)}})),
     })
     for (const call of reply.calls) {
-      const {output, summary, pages = []} = await runTool(call, {kb, data, kbId: context.kbId, pages: context.pages})
-      for (const page of pages) sources.set(page.url, page)
-      steps.push({tool: call.name, input: call.args, summary})
-      messages.push({role: 'tool', tool_call_id: call.id, name: call.name, content: output.slice(0, MAX_TOOL_OUTPUT)})
+      const result = await runTool(call, {kb, data, kbId: context.kbId, pages: context.pages})
+      for (const page of result.pages ?? []) sources.set(page.url, page)
+      const step = {tool: call.name, input: call.args, summary: result.summary}
+      steps.push(step)
+      onEvent({type: 'step', step})
+      if (result.report) {
+        report = result.report
+        onEvent({type: 'report', report})
+      }
+      messages.push({role: 'tool', tool_call_id: call.id, name: call.name, content: result.output.slice(0, MAX_TOOL_OUTPUT)})
     }
   }
   messages.push({role: 'user', content: 'Stop calling tools and answer from what you have read so far.'})
-  return done(normalize(await env.AI.run(env.MODEL as keyof AiModels, {messages, max_tokens: 1500, temperature: 0.1} as never)).text)
+  return done((await run({messages})).text)
+}
+
+// Some models add citation markers such as 【national_regulators/usa】 despite the prompt; the page lists the sources itself.
+export function finishAnswer(text: string): string {
+  const answer = text.replace(/[ \t]*【[^】]*】/g, '').trim()
+  return answer.endsWith(CLOSING) ? answer : `${answer}\n\n${CLOSING}`
 }
 
 type ToolDeps = {kb: ContextMcp; data: ContextMcp; kbId: string; pages: Map<string, Page>}
@@ -124,7 +166,7 @@ async function runTool(call: ToolCall, deps: ToolDeps): Promise<ToolResult> {
       case 'check_power_bank': {
         const {output, summary, report} = await checkPowerBank(deps.data, call.args)
         const pages = [...report.rules, ...report.guidance].flatMap((rule) => (rule.source ? [rule.source] : []))
-        return {output, summary, pages}
+        return {output, summary, pages, report}
       }
       case 'find_rules': {
         const name = String(call.args.authority ?? '')
@@ -132,6 +174,8 @@ async function runTool(call: ToolCall, deps: ToolDeps): Promise<ToolResult> {
         const pages = rows.flatMap((row) => (row.source?.url ? [{title: row.source.title, url: row.source.url}] : []))
         return {output: rows.length ? JSON.stringify(rows, null, 1) : `No rules stored for "${name}".`, summary: `Rules for "${name}": ${rows.length} found`, pages}
       }
+      case 'compare_rules':
+        return await compareRules(deps.data, String(call.args.field ?? ''))
       case 'read_entries': {
         const paths = (Array.isArray(call.args.paths) ? call.args.paths : []).map(String).slice(0, MAX_ENTRIES_PER_READ)
         const result = await deps.kb.callTool('knowledge_base_read', {knowledgeBase: deps.kbId, paths})
@@ -264,6 +308,49 @@ export function rulesForAuthorityQuery(name: string): string {
 }`
 }
 
+export type ComparedRule = {title: string; scope: Rule['scope']; status?: Rule['status']; value?: string; authority: string; source?: Page; quotes?: {text: string}[]}
+
+// The field is checked against ONBOARD_FIELDS before it reaches GROQ.
+export function compareRulesQuery(field: OnboardField): string {
+  return `*[_type == "batteryRule"]{
+  title, scope, status, "value": onboard.${field}, "authority": authority->name,
+  "source": source->{title, url},
+  "quotes": quotes[field == "onboard.${field}"]{text}
+} | order(authority asc)`
+}
+
+export async function compareRules(data: ContextMcp, field: string): Promise<ToolResult> {
+  if (!(ONBOARD_FIELDS as readonly string[]).includes(field)) {
+    return {output: `Unknown field "${field}". Use one of: ${ONBOARD_FIELDS.join(', ')}.`, summary: `compare_rules: unknown field "${field}"`}
+  }
+  return describeComparison(field, (await groq(data, compareRulesQuery(field as OnboardField))) as ComparedRule[])
+}
+
+const VALUE_ORDER = ['forbidden', 'restricted', 'discouraged', 'required', 'allowed']
+
+// Groups the rules by the value they set, strictest first; rules that say nothing are named on one line.
+export function describeComparison(field: string, rows: ComparedRule[]): ToolResult {
+  const stated = rows.filter((row) => row.value && row.value !== 'unknown')
+  const groups = new Map<string, ComparedRule[]>()
+  for (const row of stated) groups.set(row.value!, [...(groups.get(row.value!) ?? []), row])
+  const rank = (value: string) => (VALUE_ORDER.includes(value) ? VALUE_ORDER.indexOf(value) : VALUE_ORDER.length)
+  const values = [...groups.keys()].sort((a, b) => rank(a) - rank(b))
+  const silent = rows.filter((row) => !stated.includes(row)).map((row) => row.authority)
+  const lines = [`onboard.${field} across ${rows.length} stored rules. Regulators bind flights departing their country; guidance (IATA, EASA) is advisory.`]
+  for (const value of values) {
+    lines.push(`${value}:`)
+    for (const row of groups.get(value)!) {
+      const meta = [row.scope, row.status && row.status !== 'confirmed' ? `status: ${row.status}` : null].filter(Boolean).join(', ')
+      const quote = row.quotes?.[0]?.text
+      lines.push(`- ${row.authority} — ${row.title} (${meta})${quote ? `: "${quote.slice(0, 240)}"` : ''}`)
+    }
+  }
+  if (silent.length) lines.push(`not stated: ${[...new Set(silent)].join(', ')}`)
+  const pages = stated.flatMap((row) => (row.source?.url ? [{title: row.source.title, url: row.source.url}] : []))
+  const counts = values.map((value) => `${groups.get(value)!.length} ${value}`).join(', ')
+  return {output: lines.join('\n'), summary: `Compared ${rows.length} rules on ${field}: ${counts || 'none set'}`, pages}
+}
+
 // The Context MCP groq_query tool returns {meta, result}; this unwraps result.
 async function groq(data: ContextMcp, query: string): Promise<unknown> {
   const response = await data.callTool('groq_query', {query})
@@ -313,6 +400,7 @@ Today: ${now.toISOString().slice(0, 10)}.
 Tools:
 - check_power_bank: for every "can I bring" question. It converts mAh to Wh and evaluates each applicable rule in code. Never convert units or compare limits yourself. Pass every airline on the itinerary and every departure country.
 - find_rules: one authority's rules with the exact quoted wording behind each field.
+- compare_rules: one on-board condition (overhead bin, in-flight use, recharging, checked baggage, ...) across every stored airline and regulator, for questions such as "which airlines...". Name every airline it returns under what that airline says, mark disputed or unverified rules as such, and mention regulators separately (they bind flights departing their country).
 - read_entries / search_entries: the Knowledge Base, built from official pages, news and third-party copies, with conflicts between them reviewed. Use it for questions about why rules differ, what changed, and which source to trust.
 - run_groq: read-only GROQ on the dataset, only when nothing else answers.
 
