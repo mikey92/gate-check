@@ -1,7 +1,7 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {parseMessage} from '../src/mcp.ts'
-import {applicableRulesQuery, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
+import {applicableRulesQuery, kbSourceTitles, normalize, reportRule, rulesForAuthorityQuery} from '../src/agent.ts'
 import {describeRule, evaluate, strictest, toWattHours, type Finding, type Rule} from '../src/rules.ts'
 
 const texts = (findings: Finding[]) => findings.map((finding) => finding.text)
@@ -113,6 +113,20 @@ test('user text enters GROQ only as escaped string literals', () => {
   assert.match(query, /scope == "departing" && authority->country in \["KR","US"\]/)
   assert.doesNotMatch(query, /scope == "domestic"/)
   assert.match(rulesForAuthorityQuery('OZ'), /lower\(@\) == lower\("OZ"\)/)
+})
+
+test('reads the cited document titles from Knowledge Base entries', () => {
+  const entries = [
+    '# Japan MLIT Rules', '', 'Body [1][2].', '', '## Sources', '', '1. New rules for mobile batteries from 24 April 2026 — Dataset',
+    '2. ICAO Doc 9284 2025–2026 Edition, Addendum No. 1 (27/3/26) — draft text as reproduced in IATA operator guidance, Appendix C — Dataset', '',
+    '# Korean carriers', '', '## Sources', '', '1. Korean Air restricted items: power banks — Dataset', '',
+  ].join('\n')
+  assert.deepEqual(kbSourceTitles(entries), [
+    'New rules for mobile batteries from 24 April 2026',
+    'ICAO Doc 9284 2025–2026 Edition, Addendum No. 1 (27/3/26) — draft text as reproduced in IATA operator guidance, Appendix C',
+    'Korean Air restricted items: power banks',
+  ])
+  assert.deepEqual(kbSourceTitles('# No sources here'), [])
 })
 
 test('reads JSON-RPC from plain JSON and from an event stream', () => {

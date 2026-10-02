@@ -108,6 +108,13 @@ const ref = (type, slug) => {
   return {_type: 'reference', _ref: id}
 }
 
+// Knowledge Base entries cite documents by title, so a title must name exactly one rule or source.
+const titles = new Map()
+for (const doc of [...rules.map((rule) => ({id: `rule-${rule.slug}`, title: rule.title})), ...sources.map((s) => ({id: `source-${s.slug}`, title: s.meta.title}))]) {
+  if (titles.has(doc.title)) throw new Error(`${doc.id} and ${titles.get(doc.title)} share the title "${doc.title}"`)
+  titles.set(doc.title, doc.id)
+}
+
 // A rule may only state what a source says: every limit and every on-board condition it sets needs a quote.
 for (const rule of rules) {
   const quoted = new Set((rule.quotes ?? []).map((quote) => quote.field))

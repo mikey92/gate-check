@@ -360,7 +360,7 @@
   },
   {
     "slug": "incheon-2026",
-    "title": "Restricted items: power banks",
+    "title": "Incheon Airport restricted items: power banks",
     "authority": "incheon-airport",
     "source": "incheon-restricted-items",
     "scope": "departing",
@@ -631,7 +631,7 @@
   },
   {
     "slug": "korean-air",
-    "title": "Restricted items: power banks",
+    "title": "Korean Air restricted items: power banks",
     "authority": "korean-air",
     "source": "korean-air-restricted",
     "scope": "carrier",
@@ -763,7 +763,7 @@
   },
   {
     "slug": "jeju-air",
-    "title": "Restricted items: power banks",
+    "title": "Jeju Air restricted items: power banks",
     "authority": "jeju-air",
     "source": "jeju-air-restricted",
     "scope": "carrier",
@@ -1532,7 +1532,7 @@
   },
   {
     "slug": "british-airways",
-    "title": "Restricted items: power banks",
+    "title": "Restricted and prohibited items: power banks",
     "authority": "british-airways",
     "source": "british-airways-restrictions",
     "scope": "carrier",

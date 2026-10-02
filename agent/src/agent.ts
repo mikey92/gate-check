@@ -10,13 +10,18 @@ export type Env = {
 }
 
 export type Step = {tool: string; input: unknown; summary: string}
-export type Answer = {answer: string; steps: Step[]; model: string}
+export type Page = {title: string; url: string}
+// sources: every page behind the tool results the answer was written from, collected in code rather than by the model.
+export type Answer = {answer: string; steps: Step[]; model: string; sources: Page[]}
 
 type ToolCall = {id: string; name: string; args: Record<string, unknown>}
+type ToolResult = {output: string; summary: string; pages?: Page[]}
 
 const MAX_TURNS = 6
 const MAX_TOOL_OUTPUT = 12000
+const MAX_ENTRIES_PER_READ = 4
 const CONTEXT_TTL_MS = 10 * 60 * 1000
+const CLOSING = 'Check with your airline before you fly.'
 
 const TOOLS = [
   tool('check_power_bank', 'Decide whether a power bank may fly. Converts mAh to Wh and evaluates every applicable rule (each airline named, the departure countries\' regulators, and worldwide guidance) in code. Use it for every "can I bring" question.', {
@@ -31,13 +36,13 @@ const TOOLS = [
   tool('find_rules', 'One authority\'s rules with the exact quoted wording behind every field. Use it when asked what an airline or regulator says.', {
     authority: {type: 'string', description: 'Airline or regulator name or code, e.g. "Asiana", "OZ", "FAA".'},
   }, ['authority']),
-  tool('read_entries', 'Read Knowledge Base entries by path, copied verbatim from the outline. Read every relevant entry in one call.', {
-    paths: {type: 'array', items: {type: 'string'}, description: 'Entry paths from the outline, at most 8.'},
+  tool('read_entries', 'Read Knowledge Base entries by path, copied verbatim from the outline. Read the most relevant entries in one call.', {
+    paths: {type: 'array', items: {type: 'string'}, description: `Entry paths from the outline, at most ${MAX_ENTRIES_PER_READ}.`},
   }, ['paths']),
   tool('search_entries', 'Keyword search over the Knowledge Base when the outline does not show where an answer lives. Returns ranked entry paths to read next.', {
     query: {type: 'string'},
   }, ['query']),
-  tool('run_groq', 'Read-only GROQ on the structured dataset (types: authority, batteryRule, source). Last resort.', {
+  tool('run_groq', 'Read-only GROQ on the structured dataset. Last resort. Types: authority {name, kind, country, codes}; batteryRule {title, scope, status, effectiveFrom, limits, onboard, note, authority->, source->, quotes[]{field, text, source->}}; source {title, url, kind, language, capturedAt, authority->}.', {
     query: {type: 'string'},
   }, ['query']),
 ]
@@ -46,24 +51,35 @@ function tool(name: string, description: string, properties: Record<string, unkn
   return {type: 'function', function: {name, description, parameters: {type: 'object', properties, required}}}
 }
 
-type Context = {at: number; outline: string; schema: string; kbId: string; sourceIndex: string}
+type Context = {at: number; outline: string; kbId: string; pages: Map<string, Page>}
 let cachedContext: Context | undefined
 
-// Knowledge Base entries cite sources by title; the dataset knows each title's URL, kind and capture date.
+// Knowledge Base entries cite the documents they were written from by title; the dataset maps each
+// rule or source title to the page behind it, so the answer can link every page it rests on.
 async function loadContext(kb: ContextMcp, data: ContextMcp): Promise<Context> {
   if (cachedContext && Date.now() - cachedContext.at < CONTEXT_TTL_MS) return cachedContext
-  const [outline, schema, sources] = await Promise.all([
+  const [outline, docs] = await Promise.all([
     kb.callTool('initial_context', {}),
-    data.callTool('initial_context', {}),
-    groq(data, '*[_type == "source"] | order(title asc){title, url, kind, capturedAt, "authority": authority->name}'),
+    groq(data, '*[_type in ["source", "batteryRule"]]{title, "page": select(_type == "source" => {title, url}, source->{title, url})}'),
   ])
   const kbId = outline.text.match(/\bkb[a-zA-Z0-9]+/)?.[0]
   if (!kbId) throw new Error('No Knowledge Base id in initial context')
-  const sourceIndex = (sources as {title: string; url: string; kind: string; capturedAt: string; authority: string}[])
-    .map((s) => `- ${s.title} (${s.authority}, ${s.kind}, captured ${s.capturedAt.slice(0, 10)}): ${s.url}`)
-    .join('\n')
-  cachedContext = {at: Date.now(), outline: outline.text, schema: schema.text, kbId, sourceIndex}
+  const pages = new Map((docs as {title: string; page?: Page}[]).filter((doc) => doc.page?.url).map((doc) => [doc.title, doc.page as Page]))
+  cachedContext = {at: Date.now(), outline: outline.text, kbId, pages}
   return cachedContext
+}
+
+// The "## Sources" list at the end of a Knowledge Base entry: "1. <document title> — Dataset".
+export function kbSourceTitles(entryText: string): string[] {
+  const titles: string[] = []
+  for (const section of entryText.split(/^## Sources\s*$/m).slice(1)) {
+    for (const line of section.split('\n')) {
+      const match = line.match(/^\d+\.\s+(.+?)\s+—\s+\S+\s*$/)
+      if (match) titles.push(match[1])
+      else if (line.startsWith('#')) break
+    }
+  }
+  return titles
 }
 
 export async function ask(env: Env, question: string, now = new Date()): Promise<Answer> {
@@ -71,46 +87,56 @@ export async function ask(env: Env, question: string, now = new Date()): Promise
   const data = new ContextMcp(env.DATA_MCP_URL, env.SANITY_CONTEXT_TOKEN)
   const context = await loadContext(kb, data)
   const steps: Step[] = []
+  const sources = new Map<string, Page>()
   const messages: Record<string, unknown>[] = [
     {role: 'system', content: systemPrompt(context, now)},
     {role: 'user', content: question},
   ]
+  const done = (text: string): Answer => {
+    const answer = text.trim()
+    return {answer: answer.endsWith(CLOSING) ? answer : `${answer}\n\n${CLOSING}`, steps, model: env.MODEL, sources: [...sources.values()]}
+  }
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const reply = normalize(await env.AI.run(env.MODEL as keyof AiModels, {messages, tools: TOOLS, max_tokens: 1500, temperature: 0.1} as never))
-    if (reply.calls.length === 0) return {answer: reply.text.trim(), steps, model: env.MODEL}
+    if (reply.calls.length === 0) return done(reply.text)
     messages.push({
       role: 'assistant',
       content: reply.text,
       tool_calls: reply.calls.map((call) => ({id: call.id, type: 'function', function: {name: call.name, arguments: JSON.stringify(call.args)}})),
     })
     for (const call of reply.calls) {
-      const {output, summary} = await runTool(call, {kb, data, kbId: context.kbId})
+      const {output, summary, pages = []} = await runTool(call, {kb, data, kbId: context.kbId, pages: context.pages})
+      for (const page of pages) sources.set(page.url, page)
       steps.push({tool: call.name, input: call.args, summary})
       messages.push({role: 'tool', tool_call_id: call.id, name: call.name, content: output.slice(0, MAX_TOOL_OUTPUT)})
     }
   }
   messages.push({role: 'user', content: 'Stop calling tools and answer from what you have read so far.'})
-  const last = normalize(await env.AI.run(env.MODEL as keyof AiModels, {messages, max_tokens: 1500, temperature: 0.1} as never))
-  return {answer: last.text.trim(), steps, model: env.MODEL}
+  return done(normalize(await env.AI.run(env.MODEL as keyof AiModels, {messages, max_tokens: 1500, temperature: 0.1} as never)).text)
 }
 
-type ToolDeps = {kb: ContextMcp; data: ContextMcp; kbId: string}
+type ToolDeps = {kb: ContextMcp; data: ContextMcp; kbId: string; pages: Map<string, Page>}
 
-async function runTool(call: ToolCall, deps: ToolDeps): Promise<{output: string; summary: string}> {
+async function runTool(call: ToolCall, deps: ToolDeps): Promise<ToolResult> {
   try {
     switch (call.name) {
-      case 'check_power_bank':
-        return await checkPowerBank(deps.data, call.args)
+      case 'check_power_bank': {
+        const {output, summary, report} = await checkPowerBank(deps.data, call.args)
+        const pages = [...report.rules, ...report.guidance].flatMap((rule) => (rule.source ? [rule.source] : []))
+        return {output, summary, pages}
+      }
       case 'find_rules': {
         const name = String(call.args.authority ?? '')
-        const rows = (await groq(deps.data, rulesForAuthorityQuery(name))) as unknown[]
-        return {output: rows.length ? JSON.stringify(rows, null, 1) : `No rules stored for "${name}".`, summary: `Rules for "${name}": ${rows.length} found`}
+        const rows = (await groq(deps.data, rulesForAuthorityQuery(name))) as {source?: Page}[]
+        const pages = rows.flatMap((row) => (row.source?.url ? [{title: row.source.title, url: row.source.url}] : []))
+        return {output: rows.length ? JSON.stringify(rows, null, 1) : `No rules stored for "${name}".`, summary: `Rules for "${name}": ${rows.length} found`, pages}
       }
       case 'read_entries': {
-        const paths = (Array.isArray(call.args.paths) ? call.args.paths : []).map(String).slice(0, 8)
+        const paths = (Array.isArray(call.args.paths) ? call.args.paths : []).map(String).slice(0, MAX_ENTRIES_PER_READ)
         const result = await deps.kb.callTool('knowledge_base_read', {knowledgeBase: deps.kbId, paths})
-        return {output: result.text, summary: `Read ${paths.length} entr${paths.length === 1 ? 'y' : 'ies'}: ${paths.join(', ')}`}
+        const pages = kbSourceTitles(result.text).flatMap((title) => deps.pages.get(title) ?? [])
+        return {output: result.text, summary: `Read ${paths.length} entr${paths.length === 1 ? 'y' : 'ies'}: ${paths.join(', ')}`, pages}
       }
       case 'search_entries': {
         const query = String(call.args.query ?? '').slice(0, 200)
@@ -278,7 +304,7 @@ function safeJson(text: string): Record<string, unknown> {
   }
 }
 
-function systemPrompt({outline, schema, sourceIndex}: Context, now: Date): string {
+function systemPrompt({outline}: Context, now: Date): string {
   return `You are Gate Check. You answer whether a power bank (a spare lithium-ion battery) may go on a flight, and under which conditions.
 Answer only from the tools, never from memory. Airline pages, regulators and news reports disagree and change often; your job is to say exactly what the sources say, which rule is strictest, and where sources disagree.
 
@@ -290,21 +316,16 @@ Tools:
 - read_entries / search_entries: the Knowledge Base, built from official pages, news and third-party copies, with conflicts between them reviewed. Use it for questions about why rules differ, what changed, and which source to trust.
 - run_groq: read-only GROQ on the dataset, only when nothing else answers.
 
-How to answer:
-1. Start with the verdict in one sentence, copied from the tool's overall line, then one line per rule that matters.
+How to answer, in plain sentences for a traveller:
+1. Start with the verdict in one sentence that follows the tool's overall line (for example "Yes, you can bring it, but not in checked baggage."), then one line per rule that decides it. Guidance from IATA or EASA does not count towards the verdict; mention it only when it changes what the traveller should do.
 2. List the on-board conditions the tools return (no in-flight use, not in the overhead bin, cover the terminals).
-3. When sources disagree (a rule with status "disputed", or an entry that reports conflicting claims), show both claims with their sources and say which one is ground truth and why.
-4. If an airline has no stored rule, say so and point to that airline's own page.
-5. Cite sources as markdown links, [title](url), taking each URL from the source index below. No bracket markers like 【】 or [1], and no tables.
-6. End with: "Check with your airline before you fly."
+3. Name the authority behind every rule. Rules differ by authority: never apply one authority's rule to another, and never turn a recommendation ("should not") into a ban ("must not").
+4. When sources disagree (a rule with status "disputed", or an entry that reports conflicting claims), show both claims with their authorities and say which one the Knowledge Base treats as ground truth and why.
+5. If an airline has no stored rule, say so and point to that airline's own page.
+6. Do not write URLs, citation markers or a list of sources; the page lists every source you read under your answer. No tables.
+7. Always end with this exact line: "${CLOSING}"
 Be brief.
 
 Knowledge Base outline:
-${outline}
-
-Source index (title, authority, kind, capture date, URL):
-${sourceIndex}
-
-Structured dataset (GROQ mode initial context):
-${schema.slice(0, 5000)}`
+${outline}`
 }

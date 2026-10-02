@@ -128,7 +128,8 @@ async function ask() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
     const steps = data.steps.map((s) => '<li><b>' + esc(s.tool) + '</b> — ' + esc(s.summary) + '</li>').join('');
-    out.innerHTML = render(data.answer) + '<details><summary>What the agent did (' + data.steps.length + ' tool calls, ' + (data.ms / 1000).toFixed(1) + 's, ' + esc(data.model) + ')</summary><ol>' + steps + '</ol></details>';
+    const sources = (data.sources || []).length ? '<p class="sub">Pages behind this answer</p><ul>' + data.sources.map((s) => '<li>' + link(s) + '</li>').join('') + '</ul>' : '';
+    out.innerHTML = render(data.answer) + sources + '<details><summary>What the agent did (' + data.steps.length + ' tool calls, ' + (data.ms / 1000).toFixed(1) + 's, ' + esc(data.model) + ')</summary><ol>' + steps + '</ol></details>';
   } catch (err) { out.innerHTML = '<p class="error">' + esc(err.message) + '</p>'; }
   finally { go.disabled = false; go.textContent = 'Ask'; }
 }
